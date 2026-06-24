@@ -1,2 +1,25 @@
+# 非AI三件套的Skill目录（不入库）
+caveman/
+diagnose/
+git-guardrails-claude-code/
+grill-me/
+grill-with-docs/
+handoff/
+improve-codebase-architecture/
+kdocs/
+kimi-webbridge/
+migrate-to-shoehorn/
+netease-baomihua-player/
+prototype/
+scaffold-exercises/
+setup-matt-pocock-skills/
+setup-pre-commit/
+tdd/
+to-issues/
+to-prd/
+triage/
+write-a-skill/
+zoom-out/
+
 # .skill 包仅通过 Release 分发，不入库
 *.skill
