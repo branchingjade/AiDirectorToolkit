@@ -79,4 +79,6 @@ AI提示词助手 v1.2.1 ──→ 约束体系主本，提示词写作约束从
 
 ## 安装
 
-将 `AI提示词助手/`、`AI编剧助手/`、`AI导演助手/` 目录放入 `~/.claude/skills/` 即可。
+**方式一（推荐）**：从 [Releases](https://github.com/branchingjade/AI-Skills/releases) 下载 `.skill` 文件，拖入 Claude Code 对话框即可安装。
+
+**方式二**：将 `AI提示词助手/`、`AI编剧助手/`、`AI导演助手/` 目录放入 `~/.claude/skills/`。

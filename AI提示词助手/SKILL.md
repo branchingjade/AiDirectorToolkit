@@ -1,11 +1,11 @@
 ---
 name: AI提示词助手
-description: AI提示词助手 v1.2.0。Seedance 2.0 提示词写作约束的主本（canonical source）。AI导演助手和AI编剧助手的提示词约束均从此同步。将用户提供的剧情描述/剧本片段/小说段落转化为可直接用于Seedance 2.0生成的影视级提示词。仅含提示词写作约束+动作设计，不含完整分镜产出流程。Trigger: 优化提示词/改写提示词/润色提示词/提示词优化/提示词润色/提示词改写/改提示词/优化这段/改这段/润色这段/帮我改提示/帮我优化提示/prompt优化/prompt润色/Seedance提示词/提示词不行/提示词有问题
-version: 1.2.0
+description: AI提示词助手 v1.2.1。Seedance 2.0 提示词写作约束的主本（canonical source）。AI导演助手和AI编剧助手的提示词约束均从此同步。将用户提供的剧情描述/剧本片段/小说段落转化为可直接用于Seedance 2.0生成的影视级提示词。仅含提示词写作约束+动作设计，不含完整分镜产出流程。Trigger: 优化提示词/改写提示词/润色提示词/提示词优化/提示词润色/提示词改写/改提示词/优化这段/改这段/润色这段/帮我改提示/帮我优化提示/prompt优化/prompt润色/Seedance提示词/提示词不行/提示词有问题
+version: 1.2.1
 tags: [seedance, prompt-optimizer, video-generation, cinematic, canonical-constraints]
 ---
 
-# Seedance 2.0 提示词优化器 v1.2.0
+# Seedance 2.0 提示词优化器 v1.2.1
 
 > **约束规则主本**：本文档一至五章为 Seedance 2.0 提示词写作约束的唯一权威来源。AI导演助手和AI编剧助手的约束章节从此同步。修改约束时，必须同步到另外两个 Skill。
 
@@ -111,11 +111,13 @@ tags: [seedance, prompt-optimizer, video-generation, cinematic, canonical-constr
 | 运镜 | 适用情绪 | 写法 |
 |------|---------|------|
 | 急推 | 冲击/揭示/爆发 | 镜头急速推向主体 |
+| 甩镜 | 转场/冲击 | 快速甩镜切换 |
 | 固定 | 落点/台词/稳定 | 固定镜头 |
 | 缓推 | 情绪递进 | 缓慢推近 |
 | 跟拍 | 空间探索/动作 | 跟随主体移动 |
 | 手持 | 紧张/纪实 | 轻微晃动手持感 |
 | 缓拉 | 空间揭示/余韵 | 缓慢拉远 |
+| 摇镜 | 环境建立 | 缓慢摇摄（竖屏慎用，横屏常规） |
 | 仰拍 | 权力/压迫 | 低角度仰拍 |
 | 俯拍 | 渺小/孤独 | 高角度俯拍 |
 
@@ -126,6 +128,8 @@ tags: [seedance, prompt-optimizer, video-generation, cinematic, canonical-constr
 | 自然窗光 | `soft natural window light` |
 | 逆光剪影 | `backlit silhouette` |
 | 侧逆光 | `侧逆光勾勒人物轮廓` |
+
+**危险关键词**（避免单独使用）：`fast`（导致全面混乱）、`cinematic`（太模糊）、`epic`/`amazing`/`beautiful`（无实际指导力）、`lots of movement`（运动过多导致抖动）、品牌名（不影响生成）。
 
 ---
 
