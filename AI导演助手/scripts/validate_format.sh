@@ -1,7 +1,7 @@
 #!/bin/bash
 # v9.0.0 分镜格式校验脚本
 # 用法: bash validate_format.sh <分镜产出目录>
-# 输出: 逐文件6项检查结果，有违规则报错
+# 输出: 逐文件8项检查结果，有违规则报错
 
 DIR="${1:-.}"
 FAIL=0
@@ -58,14 +58,15 @@ for f in $FILES; do
     issues="$issues\n  [6] 缺少段级资产锁(整体风格)"
   fi
 
-  # 7. 描述行中的@Tag和资产代码（如 @陈强 CQ-01）
-  at_in_desc=$(grep -nP '^\s{6}.*@(陈强|护士|李素贞|陈静|王秀娟|王洪刚|万倩|林晓|磊子|林卫东|赵国斌|张所长|阿彪|毛哥)' "$f")
-  code_in_desc=$(grep -nP '^\s{6}.*(CQ-[0-9]+|WQ-[0-9]+|LX-[0-9]+|CJ-[0-9]+|WHG-[0-9]+|WXJ-[0-9]+|ZGB-[0-9]+|LSZ-[0-9]+|LZ-[0-9]+|LWD-[0-9]+)' "$f")
+  # 7. 描述行中的@Tag（通用匹配：6空格缩进后的行中含 @中文名）
+  at_in_desc=$(grep -nP '^\s{6}.*@[一-龥]+' "$f")
   if [ -n "$at_in_desc" ]; then
     issues="$issues\n  [7] 描述行含@Tag"
   fi
+  # 8. 描述行中的资产代码（通用匹配：大写字母+连字符+数字，如 CQ-01）
+  code_in_desc=$(grep -nP '^\s{6}.*\b[A-Z]{2,4}-[0-9]+\b' "$f")
   if [ -n "$code_in_desc" ]; then
-    issues="$issues\n  [7] 描述行含资产代码"
+    issues="$issues\n  [8] 描述行含资产代码"
   fi
 
   if [ -z "$issues" ]; then

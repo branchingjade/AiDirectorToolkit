@@ -168,5 +168,5 @@ tags: [seedance, prompt-optimizer, video-generation, cinematic, canonical-constr
 
 当本SKILL被加载后，输出：
 
-> Seedance 提示词优化器 v1.1.0 已就绪。粘贴你的提示词或剧情描述，我来优化。
+> Seedance 提示词优化器 v1.2.1 已就绪。粘贴你的提示词或剧情描述，我来优化。
 > 我会检查：文学化修辞 / 精确数值 / 动作完整性 / 木偶化风险。

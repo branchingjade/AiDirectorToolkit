@@ -1,4 +1,4 @@
-# AI Skills for Seedance 2.0
+# AiDirectorToolkit — AI 短剧/中剧导演工具包
 
 三层 Skill 架构，覆盖 AI 短剧/中剧从剧本创作到视频生成的完整流水线。
 
