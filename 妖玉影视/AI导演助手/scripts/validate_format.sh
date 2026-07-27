@@ -1,5 +1,5 @@
 #!/bin/bash
-# v11.0.0 分镜格式校验脚本
+# v12.0.0 分镜格式校验脚本
 # 用法: bash validate_format.sh <分镜产出目录>
 # 输出: 逐文件检查结果，有违规则报错
 # 检查项: Seedance约束 + 段级资产锁 + 描述行规范
@@ -13,7 +13,7 @@ if [ -z "$FILES" ]; then
   exit 1
 fi
 
-echo "=== v11.0.0 格式校验 ==="
+echo "=== v12.0.0 格式校验 ==="
 echo "目录: $DIR"
 echo "文件数: $(echo "$FILES" | wc -l)"
 echo ""
