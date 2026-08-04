@@ -1,11 +1,11 @@
 ---
 name: AI提示词助手
-description: "AI提示词助手 v1.4.0。Seedance 2.0 提示词写作约束的主本（canonical source）。AI导演助手和AI编剧助手的提示词约束均从此同步。将用户提供的剧情描述/剧本片段/小说段落转化为可直接用于Seedance 2.0生成的影视级提示词。仅含提示词写作约束+动作设计，不含完整分镜产出流程。Trigger: 优化提示词/改写提示词/润色提示词"
-version: 1.4.0
+description: "AI提示词助手 v1.5.0。Seedance 2.0 提示词写作约束的主本（canonical source）。AI导演助手和AI编剧助手的提示词约束均从此同步。将用户提供的剧情描述/剧本片段/小说段落转化为可直接用于Seedance 2.0生成的影视级提示词。仅含提示词写作约束+动作设计，不含完整分镜产出流程。Trigger: 优化提示词/改写提示词/润色提示词"
+version: 1.5.0
 tags: [seedance, prompt-optimizer, video-generation, cinematic, canonical-constraints]
 ---
 
-# Seedance 2.0 提示词优化器 v1.4.0
+# Seedance 2.0 提示词优化器 v1.5.0
 
 > **约束规则主本**：本文档一至五章为 Seedance 2.0 提示词写作约束的唯一权威来源。AI导演助手和AI编剧助手的约束章节从此同步。修改约束时，必须同步到另外两个 Skill。
 
@@ -17,7 +17,7 @@ tags: [seedance, prompt-optimizer, video-generation, cinematic, canonical-constr
 
 ## 一、核心约束（强制执行）
 
-这些约束在保护一件事：画面里的物理事实不被翻译成抽象概念。每一帧的光、动作、质感——是电影的最后一道门。这里翻译错了，前面编剧和导演的工作全部白费。
+这些约束在保护一件事：画面里的物理事实不被翻译成抽象概念。每一帧的光、动作、质感——是电影的最后一道门。这里翻译错了，三棵树（编剧的树、导演的树、提示词的树）的果实全部白费。
 
 ### 1.0 不编造原则（最高优先级）
 
@@ -252,6 +252,6 @@ tags: [seedance, prompt-optimizer, video-generation, cinematic, canonical-constr
 
 当本SKILL被加载后，输出：
 
-> Seedance 提示词优化器 v1.4.0 已就绪。粘贴你的提示词或剧情描述，我来优化。
+> Seedance 提示词优化器 v1.5.0 已就绪。粘贴你的提示词或剧情描述，我来优化。
 > 我会检查：文学化修辞 / 精确数值 / 动作完整性 / 焦点转移 / 木偶化风险 / 音效补全。
 > 输出格式：景别运镜自然语言开头，焦点转移融入描述行，音效作为物理描述自然融入。
