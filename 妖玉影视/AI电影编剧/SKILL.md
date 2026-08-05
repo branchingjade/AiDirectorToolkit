@@ -1,12 +1,12 @@
 ---
 name: AI电影编剧
-description: "AI电影编剧 v2.1.0。电影创作引擎——改编/原创双路径，三幕结构（Syd Field范式），90-120min时长规划。标准行业剧本格式（Courier/Slugline/对白/转场，1页≈1分钟）。默认21:9影院宽银幕（Seedance原生比例）。含🔒类型强制门禁、电影能力哲学、画面锚点、场次节奏、三幕审查、去AI味。全部规范带来源跟脚。输出锁定剧本交接给AI电影导演。"
-version: 2.1.0
+description: "AI电影编剧 v2.2.0。电影创作引擎——改编/原创双路径，三幕结构（Syd Field范式），90-120min时长规划。标准行业剧本格式（Courier/Slugline/对白/转场，1页≈1分钟）。默认21:9影院宽银幕（Seedance原生比例）。含🔒类型强制门禁、电影能力哲学、画面锚点、场次节奏、三幕审查、去AI味。全部规范带来源跟脚。输出锁定剧本交接给AI电影导演。"
+version: 2.2.0
 author: 妖玉
 tags: [film, screenplay, three-act, adaptation, original, 21-9, cinematic, industry-standard]
 ---
 
-# AI电影编剧 v2.1.0
+# AI电影编剧 v2.2.0
 
 ## 🔒 类型强制门禁（加载后第一步，未通过禁止开工）
 
@@ -115,6 +115,71 @@ tags: [film, screenplay, three-act, adaptation, original, 21-9, cinematic, indus
 - 结局是主题落点还是问题解决清单？前者是电影，后者是说明书
 
 **波次设计**：一波三折。打斗/冲突递进（小→中→大），大场面在开阔空间（21:9 横向空间展示大场面是宽银幕的本职）。
+
+---
+
+## 二·五、编剧理论精要（McKee 体系，带原文跟脚）
+
+> 详细研究见 references/《编剧理论深挖.md》《经典案例实证.md》。以下为可操作核心，每条带 McKee《Story》原文（一手来源）。
+
+### 1. 控制思想（Controlling Idea）——主题的正确姿势
+
+**McKee 原文**："A true theme is not a word but a sentence—one clear, coherent sentence that expresses a story's irreducible meaning... The Controlling Idea shapes the writer's strategic choices... toward what is expressive of your Controlling Idea and may be kept versus what is irrelevant to it and must be cut."
+
+**落地**：
+- **主题不是词是句子**："爱情"是题材不是主题；"爱需要牺牲才能持久"才是控制思想
+- **控制思想 = 删戏标准**：一场戏对控制思想无用 → 删。这就是"这场戏为什么存在"的最终答案
+- 大纲完成时先写控制思想（一句话），全片审查时逐场对照
+
+### 2. 欲望 vs 需求（Desire vs Need）
+
+**McKee 核心区分**：欲望 = 角色自以为想要的（外在目标，推情节）；需求 = 角色真正需要的（内在缺失，推主题）。
+
+**原文例子**（《欲望号街车》Blanche）："unconscious desire... What she really wants is to escape from reality"——欲望是找王子，真实需求是逃避现实（她自己不知道）。
+
+**落地**：
+- 主角必有：外在欲望（可拍成目标）+ 内在需求（主题落点）
+- **弧光完成 = 放弃欲望、获得需求**
+- 需求通常是角色自己不知道的——这就是"从未被告知"优于"被告知谎言"的深层原因
+
+### 3. 场景 = 一次价值转换（McKee 场景定义）
+
+**原文**："SCENE is an action through conflict in more or less continuous time and space that turns the value-charged condition of a character's life on at least one value with a degree of perceptible significance."
+
+**落地（场景存在性测试）**：
+1. 这场戏结束时，主角生命状态**有没有任何价值的改变**（爱/自由/尊严/生死/道德，正面→负面或反向）？
+2. 没有 = 不是场景，是活动（activity），删
+3. 转折点测试："Could it have been written 'in one,' in a unity of time and place?"——必须能连续时间地点内发生
+
+### 4. 节拍（Beat）= 行为交换
+
+**原文**："BEAT is an exchange of behavior in action/reaction. Beat by beat these changing behaviors shape the turning of a scene."
+
+**落地**：写场景前先列节拍链——A 的行为 → B 的反应 → A 再反应；场景 = 节拍的累积，节拍之间的转折就是场景的转折。
+
+### 5. 预期与结果之缝（The Gap）
+
+**原文**："the gap between expectation and result... marks the point where the human spirit and the world meet... In this gap is the truth."
+
+**落地**：每场核心 = 角色行动产生**预期之外的结果**。角色以为会得到 X，结果得到 Y——这个缝就是意义。没有缝 = 平铺直叙。
+
+### 6. 节奏单位四级结构
+
+**节拍 Beat（数秒，行为交换）→ 场景 Scene（2-5min，价值转换）→ 序列 Sequence（10-20min，叙事单元，全片 6-8 个）→ 幕 Act（25-60min）**
+
+**落地**：大纲自上而下（幕→序列→场景），初稿自下而上（节拍→场景）；序列是被低估的单位——每序列结尾有"序列高潮"让观众喘口气。
+
+### 7. 潜台词（Subtext）与信息经济
+
+**定义**（维基原文）："subtext involves themes or messages that are not directly conveyed, but can be inferred"——没有被直接说出、但可被推断的信息。
+
+**信息差三形态**：观众>角色=悬念 / 角色>观众=神秘 / 观众=角色=共情。场景开写前先问：观众知道什么、角色知道什么？**信息差就是张力源**。
+
+### 8. 案例实证（经典电影怎么做的）
+
+- **肖申克**：希望主题靠**时间结构**表达（三次假释听证作时间刻度），Red 旁白=观察者通道，屋顶啤酒=希望可视化（Ebert："a movie about time, patience and loyalty"）——**主题不喊口号，靠结构**（跟脚：《经典案例实证.md》）
+- **教父**：开场婚礼 750 群演一场戏注入全部人物关系；"无法拒绝的条件"AFI 影史第二台词=暴力不说出口的潜台词（跟脚同上）
+- **寄生虫**：奉俊昊亲口定义"楼梯电影"（stairway movie）+ 气味阶级学——**空间隐喻承载主题**（跟脚同上）
 
 ---
 
@@ -318,11 +383,13 @@ INT. BATHROOM, KEVIN'S HOUSE – MORNING
 - 《高分剧本分析.md》——6 部高分电影剧本实证（8 来源）
 - 《国内剧本格式研究.md》——中国大陆剧本格式惯例（15 来源）
 - 《国内备案审查研究.md》——电影备案审查制度与预检清单（3 来源）
+- 《编剧理论深挖.md》——McKee《Story》原文体系（控制思想/欲望vs需求/场景价值转换/节奏四级）
+- 《经典案例实证.md》——经典电影技法实证（肖申克/教父/寄生虫/银翼杀手/花样年华/七武士）
 
 ---
 
 ## 加载后固定提示
 
-> AI电影编剧 v2.1.0 已就绪（标准行业格式）。
+> AI电影编剧 v2.2.0 已就绪（标准行业格式）。
 > 第一步先确认类型：这是电影 / 短剧 / 中剧？改编还是原创？——你确认后我才开工。
 > 电影默认 21:9 影院宽银幕，三幕结构（Syd Field 范式），标准剧本格式（Courier/Slugline，1页≈1分钟）。给我一个画面，或一部素材。
