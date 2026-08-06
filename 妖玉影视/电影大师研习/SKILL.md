@@ -1,6 +1,6 @@
 ---
 name: 电影大师研习
-description: "学大师创作/读名作剧本时用——剧本渠道库(去哪读完整剧本)+三读法(从画面出发学大师手法)。对接AI电影编剧/导演，产出技法卡片。"
+description: "【土壤层】学大师创作/读名作剧本时用——剧本渠道库(去哪读完整剧本)+三读法(从画面出发学大师手法)。对接AI电影编剧/导演，产出技法卡片。"
 version: 1.0.4
 author: 妖玉
 tags: [film, master-study, screenplay, channels, learning, 土壤]
@@ -25,7 +25,7 @@ tags: [film, master-study, screenplay, channels, learning, 土壤]
 AI电影编剧 / AI电影导演 是**产出侧**（写），本 Skill 是**输入侧**（学）——读大师的一手剧本原文，把手法提炼成技法卡片，作为创作时的土壤。
 
 ```
-短剧树：AI编剧助手 → AI导演助手（9:16 竖屏）
+短剧树：AI短剧编剧助手 → AI短剧导演助手（9:16 竖屏）
 电影树：AI电影编剧 → AI电影导演（21:9 宽银幕）
 土壤层：电影大师研习（本Skill，读大师一手剧本）+ AI提示词助手（Seedance 约束主本）
 ```
@@ -166,7 +166,7 @@ AI电影编剧 / AI电影导演 是**产出侧**（写），本 Skill 是**输�
 - ⚠️ 诚实声明：文本层质量/版本不确定性
 ```
 
-报告存 Obsidian 剧本库（按片源地域分双区）：`剧本库/华语剧本/研习报告/` 或 `剧本库/海外剧本/研习报告/`（见 screenplay-library-maintenance skill 的库结构）。
+报告存 Obsidian 剧本库（按片源地域分双区）：`剧本库/华语剧本/研习报告/` 或 `剧本库/海外剧本/研习报告/`（见 剧本库维护 skill 的库结构）。
 
 ### 5. 问题集不是禁令集
 
@@ -201,11 +201,11 @@ AI电影编剧 / AI电影导演 是**产出侧**（写），本 Skill 是**输�
 
 1. **技法卡片** → `AI电影编剧/references/大师技法卡片/<片名>_技法卡片.md`（5-10 张，grep 摘录）
 2. **研习报告** → Obsidian 剧本库双区（华语/海外按片源）
-3. **剧本原文**（若抓到全文）→ 同区 `剧本原文/`，按 screenplay-library-maintenance 七步流程（编码检测→清洗→frontmatter→可信度分级→落位→三地同步→MOC+质检）
+3. **剧本原文**（若抓到全文）→ 同区 `剧本原文/`，按 剧本库维护 七步流程（编码检测→清洗→frontmatter→可信度分级→落位→三地同步→MOC+质检）
 
 **三地同步**：Obsidian 剧本库（权威副本）→ film-suite-research（本地源）→ skill references（GitHub 正本）。
 
-**入库质检清单**（screenplay-library-maintenance 第三节）：乱码 0 / frontmatter 6 字段 / 无 H1 重复 / 无控制字符 / MOC 链接有效。
+**入库质检清单**（剧本库维护 第三节）：乱码 0 / frontmatter 6 字段 / 无 H1 重复 / 无控制字符 / MOC 链接有效。
 
 ---
 
