@@ -6,7 +6,7 @@ author: 妖玉
 tags: [screenplay, obsidian, library, maintenance, encoding]
 ---
 
-# 剧本库建库/维护（Obsidian 剧本库）
+# 剧本库维护 v1.0.0
 
 > 触发：把抓到的剧本原文入库 Obsidian 剧本库、或对库内剧本做质检/清理时。
 > 目标库：`~/Documents/KnowledgeBase/Obsidian Vault/剧本库/`（华语/海外双区结构）
