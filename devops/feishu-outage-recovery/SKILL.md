@@ -1,7 +1,7 @@
 ---
 name: feishu-outage-recovery
 description: "Use when 飞书不回消息/宕机/API挂掉: 查gateway→重启→拉停机窗口消息→批量补回复。"
-version: 1.0.0
+version: 1.1.0
 tags: [feishu, gateway, outage, recovery, troubleshooting]
 ---
 
@@ -10,6 +10,8 @@ tags: [feishu, gateway, outage, recovery, troubleshooting]
 当飞书 bot 不回消息、gateway 疑似宕机、或 API 大面积失败时，按此流程走。2026-08-07 实战验证（gateway 10:56 停机 3.5h，4 人 18 条消息未回复，全部补回）。
 
 ## 一、判定宕机与定位窗口
+
+0. **先鉴别 watchdog 标记真伪**（2026-08-07 新增）：`~/AppData/Local/hermes/state/gateway_outage.json` 里每 ~30min 一条「进程不存在」**≠ gateway 真宕机**。核对 gateway.log 对应时间点是否有 `Gateway stopped`——没有 = watchdog 误报（根因：计划任务非管理员环境下 `Get-CimInstance` 读不到进程 CommandLine，命令行匹配永远返回空，曾造成 8 小时 15 次假宕机记录）。**真正判定宕机只看 gateway.log 的 `Gateway stopped` 铁证**，watchdog 记录只作参考线索。
 
 1. **看 gateway 是否活着**：
    ```bash

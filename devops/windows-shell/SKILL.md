@@ -103,6 +103,31 @@ powershell -NoProfile -Command "\$dir = \"\$env:USERPROFILE\\.foo\"; Remove-Item
 
 Note: `\\` for literal backslash in directory separators inside double-quoted PowerShell strings.
 
+## 计划任务环境读不到进程 CommandLine（WMI 权限遮罩）— 2026-08-07 实测
+
+**现象**：计划任务跑 PowerShell 检测脚本，`Get-CimInstance Win32_Process` 能枚举进程（Count 正常），但读 `CommandLine` 属性返回**空字符串** → 按命令行匹配的检测逻辑（如 `Where-Object { $_.CommandLine -match 'xxx' }`）永远匹配失败，误判「进程不存在」。
+
+**根因**：WMI 对**非管理员/服务会话**遮罩其他进程的 CommandLine 属性。计划任务默认 `InteractiveToken` 非提权运行 = 非管理员 → 读不到。手动终端（管理员）能读到 → 同一命令两种环境结果不同。
+
+**验证（区分「枚举失败」还是「CommandLine 遮罩」）**：写 probe 脚本落盘结果，用临时计划任务跑，分别测：
+```bash
+# ①进程枚举（不依赖 CommandLine）
+(Get-CimInstance Win32_Process -Filter "Name like 'python%'").Count
+# ②CommandLine 读取
+Get-CimInstance Win32_Process -Filter "Name like 'python%'" | Select-Object -ExpandProperty CommandLine
+# ③当前权限
+([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+```
+①正常 + ②空 + ③False = WMI 权限遮罩实锤。
+
+**修复方向**：
+1. **换不依赖 CommandLine 的信号**（最可靠）：进程对应的端口监听 `netstat -ano | grep LISTENING`——不读其他进程属性，无权限依赖。中文系统 netstat 输出 GBK，subprocess 需 `errors="replace"`。
+2. **计划任务提权**：`schtasks /create /xml` 重建任务，`<RunLevel>HighestAvailable</RunLevel>`（注意枚举值是 **HighestAvailable** 不是 Highest，XML 用 Highest 会报错 `(11,27):RunLevel`）。重建后 `schtasks /query /tn X /xml` 验证。
+
+**schtasks 探测技巧**：`/tr` 参数引号地狱——用独立 .py/.cmd 文件（`/tr` 直接指 python.exe + 脚本绝对路径），不要在 `/tr` 里塞复杂引号；bash 里调 powershell 的 `$` 会被吞，用单引号包住整个 `-Command`；probe 结果落盘到文件再 `cat`，计划任务 stdout 默认不返回。
+
+**排查思维（用户纠正）**：监控/自愈工具误报时，先验证「核心检测机制在目标运行环境下是否真能拿到信号」，别急着在坏检测上加兜底——「不是缺兜底，是工具本身就干不了活」。
+
 ## Common pitfalls
 
 | Symptom | Cause | Fix |
@@ -112,7 +137,8 @@ Note: `\\` for literal backslash in directory separators inside double-quoted Po
 | Process reappears after kill | Auto-restart mechanism (scheduled task, parent process, startup entry) | Check `Get-ScheduledTask`, `HKCU:\...\Run`, stop the parent first |
 | `2>$null` redirect fails | bash interprets `2>` as its own redirect | Use PowerShell-native `-ErrorAction SilentlyContinue` instead |
 | bcdedit path 反斜杠被吃掉 | bash 把 `\W` `\E` 等当作转义处理 | 用单引号：`bcdedit /set {id} path '\Windows\...'`；不要用双引号和 cmd /c |
-| `bcdedit /set` path values lose backslashes | bash treats `\` as escape char; `\Windows` → `Windows` | Use **single quotes**: `bcdedit /set {id} path '\Windows\system32\winload.efi'`. Double quotes, `\\`, and `cmd /c` all fail. |
+| `bcdedit /set` path values lose backslashes | bash treats `\\` as escape char; `\\Windows` → `Windows` | Use **single quotes**: `bcdedit /set {id} path '\\Windows\\system32\\winload.efi'`. Double quotes, `\\\\`, and `cmd /c` all fail. |
+| 计划任务检测脚本报「进程不存在」但进程在跑（gateway/watchdog 类） | WMI 对非管理员遮罩 CommandLine：`Get-CimInstance` 枚举正常但 `CommandLine` 返回空 → 按命令行匹配必然误判 | 改用端口监听（netstat LISTENING）作主判据，或计划任务提权 `<RunLevel>HighestAvailable</RunLevel>`（枚举值不是 Highest）；详见上方「计划任务环境读不到进程 CommandLine」节 |
 
 ## .env 文件加载（git-bash）
 
