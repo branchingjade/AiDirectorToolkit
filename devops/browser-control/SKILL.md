@@ -23,6 +23,23 @@ Hermes browser 工具 (browser_navigate / click / snapshot / ...)
 | Browser Use | 云端 | `BROWSER_USE_API_KEY` |
 | Camofox | 本地反检测 | `CAMOFOX_URL` |
 
+## 预览面板（桌面 app preview pane）
+
+聊天旁的预览面板是 WebView2（Chromium 内核）内嵌浏览器，独立环境（2026-08-07 实测）：
+
+- **存储**：`%APPDATA%\Hermes\Partitions\hermes-browser\`——cookie/localStorage **持久落盘**（跨重启保留）
+- **无登录态**：不继承 Chrome/Edge 任何账号；cookie 库实测仅 `github.com logged_in=no`（GitHub 给所有访客的匿名标记）。需要登录态的场景**一律 WebBridge**
+- **反爬**：实测百度搜索被弹图形验证码（`wappass.baidu.com/static/captcha`）——中文反爬站不可用
+- **定位**：公开页面 / 本地 HTML 设计稿预览（`open_preview` 工具），agent 浏览器工具抓公开内容
+- **清空重置**：关掉桌面 app 后删除 `Partitions\hermes-browser\` 整个目录
+
+**验证登录态（读 cookie 库，比看文件大小可靠）：**
+```python
+import sqlite3
+con = sqlite3.connect("file:C:/Users/<user>/AppData/Roaming/Hermes/Partitions/hermes-browser/Network/Cookies?mode=ro&immutable=1", uri=True)
+con.execute("SELECT host_key, name, value FROM cookies").fetchall()  # logged_in='no' = 未登录
+```
+
 ## 场景路由
 
 | 用户说 | 选层 | 解释 |

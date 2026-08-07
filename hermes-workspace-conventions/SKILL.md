@@ -299,6 +299,10 @@ venv/Scripts/python.exe -m pip install --force-reinstall charset-normalizer
 
 `read_file` 对 .md 报 "Binary file - cannot display as text"（Obsidian UTF-8 中文文件普遍）的根因：`head -c 1000` 采样在 1000 字节边界切断 UTF-8 多字节字符 → 解码产生 **1 个** U+FFFD → 旧判定 `if "\ufffd" in sample` 见 1 个就判 binary。**与 CRLF 无关**（`\r` 本来就被排除在 non-printable 外）。真解码失败（如 GBK 读 UTF-8）产生几十个 U+FFFD——判定阈值区分截断噪声与真失败。已本地补丁 `tools/file_operations.py` 的 `_is_likely_binary`：改为 `content_sample[:1000].count("\ufffd") > 1`。⚠️ `hermes update` 会覆盖补丁，升级后需重打；复现时临时读法 `tr -d '\r' < 文件` 管道（grep/sed 直接处理 CRLF 文件本身没问题）。上游值得提 PR：判定注释假设"合法 UTF-8 文本不含 U+FFFD"在截断采样下不成立。
 
+### Windows 计划任务跑控制台程序必弹窗（pythonw 解法，2026-08-07 实测）
+
+计划任务「登录时」交互运行 python.exe 会弹 cmd 窗口（如 `HermesRemoteServe` 远程网关）。解法：任务执行程序换成 **`pythonw.exe`**（venv\Scripts\pythonw.exe 默认存在）——无窗口且不影响 stdout 重定向（`> serve_remote.log 2>&1` 在 cmd 层重定向后 Python 正常初始化 sys.stdout）。注意：serve 进程内部可能重新 exec 成 python.exe（tasklist 显示 python.exe），但继承 pythonw 的无控制台句柄，仍不弹窗。无窗口后排障靠日志文件。改任务用 `schtasks /change /tn <任务> /tr "cmd /c cd /d <dir> && venv\Scripts\pythonw.exe -m ... > log 2>&1"`；git-bash 里 `git -C ~/Documents/...` 可能报 No such file（MSYS 路径不被 git.exe 识别）——用 `cd` + Windows 路径（`C:/...`）规避。
+
 ### 管理员进程看不到用户级映射盘符（UAC）
 
 Hermes 终端以管理员权限运行时，`net use` / `Get-PSDrive` 看不到普通用户会话里映射的网络驱动器（Y:/Z: 等），`\\主机\共享` UNC 直接访问也失败（系统错误 5 拒绝 / 67 找不到网络名），而普通软件正常——根因是 UAC 下提升进程与用户会话的链接未建立。诊断：`HKCU\Network\<盘符>` 的 RemotePath 字段可确认映射本体是否存在。修复：注册表 `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\EnableLinkedConnections = 1`（DWORD），**注销或重启后生效**（登录时才创建链接，当前进程立即验证仍不可见属正常）。修复前兜底：SFTP/SSH 直连数据源（如 NAS）。
