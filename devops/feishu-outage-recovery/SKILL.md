@@ -114,6 +114,7 @@ lark-cli im +chat-messages-list --chat-id "<oc_xxx>" --as bot --order desc --pag
 | 恢复后无人回复「你死了吗」 | 停机窗口消息未补推，用户以为被无视 | 拉消息 → 补回复道歉 |
 | watchdog 标记文件每 ~30min 一条「进程不存在」，但 gateway 实际正常 | 计划任务环境下 `Get-CimInstance` 读不到其他进程的 CommandLine（权限/会话隔离），按命令行匹配必然返回空 → 误判宕机拉起 | 检测判据改为：①端口 8644 LISTENING（netstat 主判据，不依赖 CommandLine 权限）②日志 <10min 新鲜（覆盖重启窗口期）③命令行匹配兜底。注意 netstat 中文系统输出 GBK，subprocess 要 `errors="replace"` |
 | 修完误报后遗留 15 条假宕机记录 | 标记文件 outages 历史是脏数据 | 清空 `gateway_outage.json` 的 `outages` 列表，`last_outage_reason` 注明已修复 |
+| 重建 watchdog 计划任务后又不检测了 | schtasks /create 默认 RunLevel=LeastPrivilege，非管理员下 WMI 读不到 CommandLine | 用 XML 注册并设 `<RunLevel>HighestAvailable</RunLevel>`（`schtasks /create /tn ... /xml task.xml /f`），验证：`[xml]$x=schtasks /query /tn "Hermes_Gateway_Watchdog" /xml \| Out-String; $x.Task.Principals.Principal.RunLevel` 返回 HighestAvailable |
 
 ## 前置条件
 
