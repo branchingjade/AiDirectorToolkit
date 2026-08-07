@@ -1,0 +1,12 @@
+{
+  "taps": [
+    {
+      "repo": "https://github.com/mattpocock/skills",
+      "path": "skills/"
+    },
+    {
+      "repo": "https://github.com/DevvGwardo/impeccable",
+      "path": "skills/"
+    }
+  ]
+}

@@ -146,6 +146,17 @@ python "$S" verify <笔记.md>   # citations OK 才算过
 
 **用户偏好关联**：知识库的 frontmatter/MOC/交叉引用规范由 `knowledge-base` skill 管（本 skill 只管"测试产物属于 skill"的归位决策）；保存动作前先确认归位方向，不确定时问用户（实测我默认放影视项目目录被纠正）。
 
+### 11. 题材密码提炼（从存量资产合成密码文档，零抓取模式）
+
+研习管线收尾阶段：技法卡片/研习报告/导演深化文档已齐后，用户会派子代理"从存量提炼题材密码"（题材库系列文档，2026-08-07 实战：题材库 07 底层/时间/青春）。本模式**零网络抓取**，全部从本地资产合成：
+
+- **编号**：先 grep 题材密码目录现有编号（01志怪/02悬疑/03喜剧/04爱情/05武侠/06剧情作者），新文档取下一个；标题格式 `# <题材>题材创作密码（AI电影编剧 · 题材库 NN）`
+- **素材三源**：①大师技法卡片（妖玉影视/_知识库/references/大师技法卡片/）；②研习报告——**分两处**：`film-suite-research/研习报告/`（大部分）+ `Obsidian Vault/剧本库/华语剧本/研习报告/`（小山回家、牯岭街等仅此有，两处都要 ls）；③导演手法体系深化（film-suite-research/技法卡片源稿/<导演>_手法体系深化.md）
+- **模板对齐**：先读同目录最新题材密码（志怪 v1.1 为八节母版：定义谱系/世界观规则/结构范式/调性混搭/范本分析+横向对比表/常见坑/自检清单/来源清单），Header 带 触发/方法/版本
+- **引用约定**：[卡·片名N]=技法卡片、[研·片名]=研习报告、[深·导演]=深化文档；来源清单末尾附"取证边界说明"（继承各卡片诚实声明：剧本版本/台词转录层级/未逐帧看片）
+- **质量纪律**：每条论断带来源标注；抓不到的标"未取证到"；异见保留（如三峡好人纪念碑升空被批突兀）；聚焦可落地（可复用时机/步骤化）
+- 完整模板细节与本次实战记录：references/题材密码提炼-20260807.md
+
 ## 实战迭代闭环（测试缺口 → 修复 → 发布）
 
 用户说"需要迭代优化的现在进行"时，把测试发现的缺口立即回填进 skill 并发布——**测试缺口不是记录在案的备忘，是下一轮迭代的输入**：
@@ -165,7 +176,7 @@ python "$S" verify <笔记.md>   # citations OK 才算过
 | skill_manage create 拒绝中文名（"Invalid skill name"） | 用 write_file 直接写 `skills/<分类>/<中文名>/SKILL.md`（妖玉影视命名铁律：目录名=skill name 中文） |
 | 子代理 50 次工具调用上限中断，笔记未落盘 | 读 `cache/delegation/subagent-summary-*.txt` 完整输出 → 提取正文写入目标文件（summary 里有完整 markdown） |
 | 子代理抓的原始资料在 pages/ 但无笔记 | 主线程直接读 pages/*.txt 提取要点补写 |
-| grep 中文/emoji 失效（rg 对中文路径 IO error） | 用 terminal grep 而非 search_files |
+| grep 中文/emoji 失效（rg 对中文路径 IO error）；**search_files target=files 对中文路径同样返回 0**（2026-08-07 实测：四个中文目录全 0，目录实际存在） | 用 terminal grep / ls 而非 search_files；先 `ls` 定位目录再 read_file |
 | read_file 报 binary 无法显示 | 用 terminal sed/head 读 |
 | 内联 heredoc/大命令被安全模块拦截 | 拆成小命令或写脚本文件执行 |
 | `python -c` 内联带嵌套引号/中文（execute_code 或 bash 里）解析失败 | **直接 write_file 写 .py 再执行**，不要写长内联命令（2026-08-05 实测：execute_code 里 `python -c` 嵌两层引号出 SyntaxError + bash \"command not found\" 各一次，改独立脚本一次过） |
@@ -197,3 +208,4 @@ python "$S" verify <笔记.md>   # citations OK 才算过
 
 - [references/film-suite-build-20260805.md](references/film-suite-build-20260805.md) — 电影套件构建实战记录（切片划分/来源规模/关键决策/超时恢复/污染检查）
 - [references/剧本研习渠道-20260806.md](references/剧本研习渠道-20260806.md) — 23 部范本三轮深挖的渠道实测补充（juben.pro 登录态全文/IMSDb 逗号 slug/华语作者电影无剧本替代方案/文本层损坏处理）
+- [references/题材密码提炼-20260807.md](references/题材密码提炼-20260807.md) — 题材库系列文档（题材库 07 底层/时间/青春）八节模板逐节规范、素材双位置、引用标注与质量纪律实战记录

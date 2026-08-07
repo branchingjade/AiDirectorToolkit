@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=1600">
+<title>O Graf 设计中台</title>
+<!-- 
+  完整的 OGraf 模板设计工作台。
+  左侧：模板列表 + 版本历史
+  中间：实时预览 + 对比模式
+  右侧：分组属性编辑（文字/颜色/排版/布局/线条）
+  底部：保存版本、对比、导出 OGraf
+  数据存 localStorage，刷新不丢。
+  
+  使用说明：
+  1. 打开此文件（浏览器直接 file:// 访问）
+  2. 左侧选模板，右侧调参数，中间实时看效果
+  3. 点「保存版本」记录快照
+  4. 选历史版本后点「对比」左右分屏 A/B 比较
+  5. 定稿后点「导出 OGraf」下载 .ograf.json manifest
+  6. HTML 模板源码在属性面板底部可直接复制
+-->
+<style>
+:root{--bg:#1a1a1d;--pnl:#222228;--bd:#333;--tx:#b0b0b0;--gl:#cdb896;--ac:#c4a060;--dim:#555}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--tx);font:13px/1.5 "Microsoft YaHei","PingFang SC",sans-serif;display:flex;height:100vh;overflow:hidden}
+.pnl{background:var(--pnl);overflow-y:auto;flex-shrink:0}
+.pnl.l{width:200px;border-right:1px solid var(--bd)}
+.pnl.r{width:340px;border-left:1px solid var(--bd)}
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.hdr{padding:8px 14px;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:8px}
+.hdr .logo{font-size:15px;font-weight:bold;color:var(--gl);letter-spacing:3px;white-space:nowrap}
+.hdr .nav{display:flex;gap:2px;margin-left:12px}
+.hdr .nav button{padding:5px 14px;font-size:12px;border:1px solid transparent;background:transparent;color:var(--tx);cursor:pointer;border-radius:4px;transition:.15s}
+.hdr .nav button:hover{border-color:var(--ac);color:#fff}
+.hdr .nav button.on{background:var(--ac);color:#111;border-color:var(--ac);font-weight:bold}
+.hdr .spc{flex:1}
+.hdr .act{padding:5px 14px;font-size:12px;border:1px solid var(--bd);background:var(--pnl);color:var(--tx);border-radius:4px;cursor:pointer;transition:.15s}
+.hdr .act:hover{background:#2a2a30;color:#fff}
+.hdr .act.prim{background:var(--ac);color:#111;border-color:var(--ac);font-weight:bold}
+.sec-t{font-size:10px;color:var(--dim);letter-spacing:2px;padding:10px 12px 4px;display:flex;justify-content:space-between;align-items:center}
+.sec-t .add{cursor:pointer;color:var(--ac);font-size:15px;line-height:1;transition:.15s}
+.sec-t .add:hover{color:#fff}
+.tpl-i{padding:7px 16px;cursor:pointer;font-size:12px;color:#999;display:flex;align-items:center;gap:7px;border-radius:0 4px 4px 0;margin:1px 8px 1px 0;transition:.1s}
+.tpl-i:hover{background:#2a2a30;color:#ddd}
+.tpl-i.sel{background:#2a2a35;color:var(--gl);font-weight:bold}
+.tpl-i .dot{width:5px;height:5px;border-radius:50%;background:var(--gl);opacity:.4;flex-shrink:0}
+.tpl-i.sel .dot{opacity:1;box-shadow:0 0 6px var(--gl)}
+.preview{flex:1;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center}
+.preview.split{display:grid;grid-template-columns:1fr 1fr}
+.preview .frame{width:100%;height:100%;position:relative;overflow:hidden}
+.preview .frame .tag{position:absolute;top:6px;left:10px;font-size:10px;color:var(--dim);z-index:1}
+.pbar{padding:5px 14px;border-top:1px solid var(--bd);display:flex;align-items:center;gap:8px;font-size:11px}
+.pbar .tpl-name{color:var(--gl);font-weight:bold}
+.pbar select{padding:2px 6px;background:var(--pnl);border:1px solid var(--bd);color:var(--tx);border-radius:3px;font-size:11px}
+.pbar .sp{color:var(--dim)}
+.props{padding:12px}
+.props .group{margin-bottom:16px}
+.props .group-t{font-size:12px;font-weight:bold;color:var(--gl);margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #2a2a30;letter-spacing:1px}
+.props .row{display:flex;gap:6px;margin-bottom:4px}
+.props .row>*{flex:1}
+.props label{display:block;font-size:11px;color:#888;margin-bottom:2px}
+.props label .hint{font-size:10px;color:var(--dim);margin-left:4px}
+.props input[type=text],.props input[type=number]{width:100%;padding:5px 8px;background:#1e1e24;border:1px solid var(--bd);color:#ddd;font-size:12px;border-radius:3px;transition:.1s}
+.props input[type=text]:focus,.props input[type=number]:focus{border-color:var(--ac);outline:none}
+.props input[type=color]{width:100%;height:30px;border:1px solid var(--bd);border-radius:4px;cursor:pointer;background:transparent}
+.props input[type=range]{width:100%;accent-color:var(--ac);margin:2px 0}
+.props select{width:100%;padding:5px 8px;background:#1e1e24;border:1px solid var(--bd);color:#ddd;font-size:12px;border-radius:3px}
+.props textarea{width:100%;height:100px;background:#15151a;border:1px solid var(--bd);color:#999;font-size:11px;font-family:"Cascadia Code",Consolas,monospace;padding:6px;border-radius:3px;resize:vertical;white-space:pre-wrap;word-break:break-all}
+.props .val{font-size:10px;color:var(--dim);text-align:right;margin-top:-2px}
+.ver-l{max-height:160px;overflow-y:auto}
+.ver-i{padding:4px 10px;cursor:pointer;font-size:11px;border-bottom:1px solid #222;display:flex;justify-content:space-between;align-items:center}
+.ver-i:hover,.ver-i.sel{background:#2a2a30}
+.ver-i .vdel{color:#844;cursor:pointer;font-size:14px;padding:0 2px}
+.ver-i .vdel:hover{color:#f44}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:99}
+.modal>div{background:var(--pnl);border:1px solid var(--bd);padding:22px;border-radius:8px;min-width:380px}
+.modal h2{font-size:14px;color:var(--gl);margin-bottom:14px}
+.modal label{display:block;font-size:11px;color:#888;margin:8px 0 3px}
+.modal input,.modal select{width:100%;padding:6px 10px;background:#1e1e24;border:1px solid var(--bd);color:#ddd;font-size:12px;border-radius:3px;margin-bottom:4px}
+.modal .mbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+.modal .mbtns button{padding:6px 18px;font-size:12px;border:1px solid var(--bd);background:var(--pnl);color:var(--tx);border-radius:4px;cursor:pointer}
+.modal .mbtns button.ac{background:var(--ac);color:#111;border-color:var(--ac);font-weight:bold}
+.NP{position:absolute;inset:0;font-family:"SimSun","Songti SC",serif}
+</style>
+</head>
+<body>
+<div class="pnl l">
+<div class="sec-t">模板列表<span class="add" title="新建模板" onclick="showNewDlg()">＋</span></div>
+<div id="tplList"></div>
+<div class="sec-t">版本历史</div>
+<div class="ver-l" id="verList"></div>
+</div>
+<div class="main">
+<div class="hdr"><span class="logo">O GRAF 设计中台</span><div class="nav"><button class="on" onclick="setCat('title')">标题</button><button onclick="setCat('generator')">生成器</button><button onclick="setCat('effect')">特效</button><button onclick="setCat('transition')">转场</button></div><div class="spc"></div><button class="act" onclick="saveVer()">💾 保存版本</button><button class="act" onclick="toggleSplit()">⇔ 对比</button><button class="act prim" onclick="doExport()">⬇ 导出 OGraf</button></div>
+<div class="preview" id="preview"></div>
+<div class="pbar"><span class="tpl-name" id="tplName"></span><span class="sp">｜</span>对比版本 <select id="cmpSelect"><option value="">—</option></select><span style="margin-left:auto;font-size:10px;color:var(--dim)">数据存储在本地浏览器</span></div>
+</div>
+<div class="pnl r props" id="propPanel"></div>
+<div class="modal" id="newDlg" style="display:none"><div><h2>新建模板</h2><label>名称</label><input id="nfName" placeholder="例：老电影噪点"><label>分类</label><select id="nfCat"><option value="title">标题</option><option value="generator">生成器</option><option value="effect">特效</option><option value="transition">转场</option></select><label>CSS 类名</label><input id="nfCls" placeholder="例：film-grain"><div class="mbtns"><button onclick="document.getElementById('newDlg').style.display='none'">取消</button><button class="ac" onclick="createTpl()">创建</button></div></div></div>
+<script>
+const SK='ograf_studio_v2';const FONTS=['"SimSun","Songti SC",serif','"FangSong","Songti SC",serif','"KaiTi","Songti SC",serif','"Microsoft YaHei","PingFang SC",sans-serif','Georgia,"Times New Roman",serif','"Times New Roman",serif','Arial,Helvetica,sans-serif','"Courier New",monospace'];
+function loadDB(){try{return JSON.parse(localStorage.getItem(SK))||defDB()}catch(e){return defDB()}}
+function save(){localStorage.setItem(SK,JSON.stringify(DB))}
+function defDB(){return{tpls:[
+{id:'ink',name:'墨韵·水墨笔触',cat:'title',cls:'ink',dur:5,html:'<div class="NP"><div style="position:absolute;bottom:{{posY}}%;left:{{posX}}%;display:flex;align-items:flex-end;gap:{{gapX}}px"><div style="width:{{lineW}}px;height:{{lineH}}px;background:var(--c1);opacity:{{lineOp}};border-radius:1px"></div><div style="display:flex;flex-direction:column;gap:4px;padding-bottom:4px"><div style="font-size:{{nameSize}}px;font-weight:bold;color:var(--c1);letter-spacing:{{nameSp}}px;white-space:nowrap;font-family:{{font}}">{{headline}}</div><div style="font-size:{{subSize}}px;color:var(--c2);opacity:{{subOp}};letter-spacing:{{subSp}}px;white-space:nowrap;font-family:{{font}}">{{subtitle}}</div></div></div></div>',props:{headline:{g:'文字',l:'人名',t:'text',d:'李云洲'},subtitle:{g:'文字',l:'职位',t:'text',d:'江南织造府总管'},c1:{g:'颜色',l:'墨色',t:'color',d:'#cdb896'},c2:{g:'颜色',l:'纸色',t:'color',d:'#a09078'},font:{g:'排版',l:'字体',t:'font',d:'"SimSun","Songti SC",serif'},nameSize:{g:'排版',l:'名字号',t:'slider',d:68,min:30,max:120},nameSp:{g:'排版',l:'名字距',t:'slider',d:4,min:0,max:30},subSize:{g:'排版',l:'职位字号',t:'slider',d:26,min:14,max:60},subSp:{g:'排版',l:'职位字距',t:'slider',d:10,min:0,max:30},subOp:{g:'排版',l:'职位透明度',t:'slider',d:0.8,min:0,max:1,step:0.05},posX:{g:'布局',l:'水平位置%',t:'slider',d:12,min:0,max:50},posY:{g:'布局',l:'垂直位置%',t:'slider',d:18,min:5,max:40},gapX:{g:'布局',l:'线间距',t:'slider',d:28,min:10,max:80},lineW:{g:'线条',l:'线宽',t:'slider',d:3,min:1,max:10},lineH:{g:'线条',l:'线高',t:'slider',d:180,min:40,max:400},lineOp:{g:'线条',l:'线透明度',t:'slider',d:0.35,min:0,max:1,step:0.05}},vers:[]},
+{id:'silk',name:'绢本·手卷横批',cat:'title',cls:'silk',dur:5,html:'<div class="NP"><div style="position:absolute;bottom:{{posY}}%;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center"><div style="height:{{lineH}}px;background:var(--c1);opacity:{{lineOp}};width:{{lineW}}px"></div><div style="font-size:{{nameSize}}px;font-weight:normal;color:var(--c2);letter-spacing:{{nameSp}}px;white-space:nowrap;margin:10px 0;font-family:{{font}}">{{headline}}</div><div style="font-size:{{subSize}}px;color:var(--c2);opacity:{{subOp}};letter-spacing:{{subSp}}px;white-space:nowrap;font-family:{{font}}">{{subtitle}}</div><div style="height:{{lineH}}px;background:var(--c1);opacity:{{lineOp}};width:{{lineW}}px"></div></div></div>',props:{headline:{g:'文字',l:'人名',t:'text',d:'云 锦 之'},subtitle:{g:'文字',l:'职位',t:'text',d:'金陵织造使'},c1:{g:'颜色',l:'绢色',t:'color',d:'#c4a87c'},c2:{g:'颜色',l:'字色',t:'color',d:'#cdb896'},font:{g:'排版',l:'字体',t:'font',d:'"FangSong","Songti SC",serif'},nameSize:{g:'排版',l:'名字号',t:'slider',d:60,min:30,max:120},nameSp:{g:'排版',l:'名字距',t:'slider',d:12,min:0,max:30},subSize:{g:'排版',l:'职位字号',t:'slider',d:22,min:14,max:60},subSp:{g:'排版',l:'职位字距',t:'slider',d:10,min:0,max:30},subOp:{g:'排版',l:'职位透明度',t:'slider',d:0.7,min:0,max:1,step:0.05},posY:{g:'布局',l:'垂直位置%',t:'slider',d:20,min:5,max:40},lineW:{g:'线条',l:'线宽(px)',t:'slider',d:380,min:100,max:800},lineH:{g:'线条',l:'线粗(px)',t:'slider',d:1.5,min:0.5,max:6,step:0.5},lineOp:{g:'线条',l:'线透明度',t:'slider',d:0.35,min:0,max:1,step:0.05}},vers:[]},
+{id:'stone',name:'金石·碑拓篆刻',cat:'title',cls:'stone',dur:5,html:'<div class="NP"><div style="position:absolute;bottom:{{posY}}%;left:{{posX}}%;display:flex;align-items:flex-end;gap:{{gapX}}px"><div style="width:{{sealW}}px;height:{{sealW}}px;border:{{sealB}}px solid var(--c1);display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-bottom:6px"><span style="font-size:{{sealS}}px;font-weight:bold;color:var(--c1);letter-spacing:-2px">印</span></div><div style="display:flex;flex-direction:column;gap:4px"><div style="font-size:{{nameSize}}px;font-weight:bold;color:var(--c2);letter-spacing:{{nameSp}}px;white-space:nowrap;font-family:{{font}}">{{headline}}</div><div style="width:{{divW}}px;height:1px;background:var(--c1);opacity:{{divOp}}"></div><div style="font-size:{{subSize}}px;color:var(--c1);letter-spacing:{{subSp}}px;white-space:nowrap;font-family:{{font}}">{{subtitle}}</div></div></div></div>',props:{headline:{g:'文字',l:'人名',t:'text',d:'萧 镇 山'},subtitle:{g:'文字',l:'职位',t:'text',d:'镇北大将军'},c1:{g:'颜色',l:'印色',t:'color',d:'#c4a060'},c2:{g:'颜色',l:'铜色',t:'color',d:'#cdb896'},font:{g:'排版',l:'字体',t:'font',d:'"SimSun","Songti SC",serif'},nameSize:{g:'排版',l:'名字号',t:'slider',d:68,min:30,max:120},nameSp:{g:'排版',l:'名字距',t:'slider',d:6,min:0,max:30},subSize:{g:'排版',l:'职位字号',t:'slider',d:26,min:14,max:60},subSp:{g:'排版',l:'职位字距',t:'slider',d:10,min:0,max:30},posX:{g:'布局',l:'水平位置%',t:'slider',d:12,min:0,max:50},posY:{g:'布局',l:'垂直位置%',t:'slider',d:18,min:5,max:40},gapX:{g:'布局',l:'印文间距',t:'slider',d:20,min:10,max:80},sealW:{g:'印章',l:'印尺寸',t:'slider',d:56,min:30,max:120},sealS:{g:'印章',l:'印字号',t:'slider',d:28,min:16,max:60},sealB:{g:'印章',l:'印边框',t:'slider',d:2.5,min:1,max:6,step:0.5},divW:{g:'分割线',l:'线宽',t:'slider',d:280,min:100,max:600},divOp:{g:'分割线',l:'线透明度',t:'slider',d:0.45,min:0,max:1,step:0.05}},vers:[]},
+{id:'repub',name:'民国风·月份牌美学',cat:'title',cls:'repub',dur:5,html:'<div class="NP"><div style="position:absolute;bottom:{{posY}}%;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center"><div style="display:flex;align-items:center;gap:{{gapX}}px"><div style="width:{{fwW}}px;height:{{fwH}}px;background:var(--c2);opacity:{{fwOp}}"></div><div style="font-size:{{nameSize}}px;font-weight:normal;color:var(--c1);letter-spacing:{{nameSp}}px;white-space:nowrap;font-family:{{font}}">{{headline}}</div><div style="width:{{fwW}}px;height:{{fwH}}px;background:var(--c2);opacity:{{fwOp}}"></div></div><div style="width:{{divW}}px;height:1px;background:var(--c2);opacity:{{divOp}};margin:5px 0"></div><div style="font-size:{{subSize}}px;color:var(--c1);opacity:{{subOp}};letter-spacing:{{subSp}}px;white-space:nowrap;font-family:{{enFont}}">{{subtitle}}</div></div></div>',props:{headline:{g:'文字',l:'中文名',t:'text',d:'周 慕 云'},subtitle:{g:'文字',l:'英文名',t:'text',d:'CHOW MO-WAN'},c1:{g:'颜色',l:'主色',t:'color',d:'#cdbfa8'},c2:{g:'颜色',l:'辅色',t:'color',d:'#aaa49c'},font:{g:'排版',l:'中文字体',t:'font',d:'"FangSong","Songti SC",serif'},enFont:{g:'排版',l:'英文字体',t:'font',d:'Georgia,"Times New Roman",serif'},nameSize:{g:'排版',l:'名字号',t:'slider',d:52,min:24,max:100},nameSp:{g:'排版',l:'名字距',t:'slider',d:8,min:0,max:30},subSize:{g:'排版',l:'英文大小',t:'slider',d:20,min:12,max:50},subSp:{g:'排版',l:'英文字距',t:'slider',d:6,min:0,max:20},subOp:{g:'排版',l:'英文透明度',t:'slider',d:0.7,min:0,max:1,step:0.05},posY:{g:'布局',l:'垂直位置%',t:'slider',d:20,min:5,max:40},gapX:{g:'框线',l:'框间距',t:'slider',d:36,min:10,max:100},fwW:{g:'框线',l:'框线宽',t:'slider',d:1.5,min:0.5,max:6,step:0.5},fwH:{g:'框线',l:'框线高',t:'slider',d:44,min:20,max:100},fwOp:{g:'框线',l:'框线透明度',t:'slider',d:0.25,min:0,max:1,step:0.05},divW:{g:'分割线',l:'线宽',t:'slider',d:280,min:100,max:600},divOp:{g:'分割线',l:'线透明度',t:'slider',d:0.2,min:0,max:1,step:0.05}},vers:[]}
+],cur:'ink',cat:'title',split:false,splitVer:null}}
+let DB=loadDB();let data={};function gT(id){id=id||DB.cur;return DB.tpls.find(t=>t.id===id)}
+function selTpls(){return DB.tpls.filter(t=>t.cat===DB.cat)}
+function initD(){const t=gT();data={};Object.keys(t.props).forEach(k=>{data[k]=t.props[k].d})}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function rLeft(){const tl=document.getElementById('tplList');const ts=selTpls();tl.innerHTML=ts.map(t=>`<div class="tpl-i${t.id===DB.cur?' sel':''}" onclick="selT('${t.id}')"><span class="dot"></span>${t.name}</div>`).join('');const t=gT();const vl=document.getElementById('verList');if(t&&t.vers)vl.innerHTML=t.vers.map((v,i)=>`<div class="ver-i" onclick="ldVer(${i})"><span>${v.label||'版本'+(i+1)}</span><span class="vdel" onclick="event.stopPropagation();rmVer(${i})">×</span></div>`).join('');else vl.innerHTML='<div style="font-size:11px;color:var(--dim);padding:8px">暂无保存版本</div>';const cmp=document.getElementById('cmpSelect');cmp.innerHTML='<option value="">—</option>';if(t&&t.vers)t.vers.forEach((v,i)=>{cmp.innerHTML+=`<option value="${i}">${v.label||'版本'+(i+1)}</option>`})}
+function rPreview(){const p=document.getElementById('preview');p.innerHTML='';p.className='preview'+(DB.split?' split':'');const t=gT();const f=buildFrame(t,data,'当前');p.appendChild(f);if(DB.split&&DB.splitVer!=null&&t.vers[DB.splitVer]){const cf=buildFrame(t,t.vers[DB.splitVer].data,'对比');p.appendChild(cf)}}
+function buildFrame(tpl,vals,tag){const el=document.createElement('div');el.className='frame '+tpl.cls;el.style.background='radial-gradient(ellipse at center,#2a2520 0%,#0d0b08 100%)';let h=tpl.html;Object.keys(vals).forEach(k=>{h=h.replace(new RegExp('{{'+k+'}}','g'),vals[k])});el.innerHTML=h;Object.keys(vals).forEach(k=>{if(k.startsWith('c'))el.style.setProperty('--'+k,vals[k])});if(tag){const d=document.createElement('div');d.className='tag';d.textContent=tag;el.appendChild(d)}return el}
+function rProps(){const t=gT();const groups={};Object.entries(t.props).forEach(([k,v])=>{const g=v.g||'其他';if(!groups[g])groups[g]=[];groups[g].push([k,v])});let h='';Object.entries(groups).forEach(([gn,items])=>{h+=`<div class="group"><div class="group-t">${gn}</div>`;items.forEach(([k,v])=>{h+=`<label>${v.l}<span class="hint">${k}</span></label>`;if(v.t==='color')h+=`<input type="color" value="${data[k]}" oninput="up('${k}',this.value)">`;else if(v.t==='font')h+=`<select onchange="up('${k}',this.value)">${FONTS.map(f=>`<option value="${esc(f)}" ${data[k]===f?'selected':''}>${f.split(',')[0].replace(/"/g,'')}</option>`).join('')}</select>`;else if(v.t==='slider'){const val=Number(data[k]);h+=`<div class="row"><input type="range" min="${v.min||0}" max="${v.max||100}" step="${v.step||1}" value="${val}" oninput="up('${k}',this.value);this.nextElementSibling.textContent=this.value${v.step&&v.step<1?'.toFixed(2)':''}"><span class="val">${v.step&&v.step<1?Number(val).toFixed(2):val}</span></div>`}else h+=`<input type="text" value="${data[k]||''}" oninput="up('${k}',this.value)">`});h+='</div>'});h+=`<div class="group"><div class="group-t">源码</div><textarea readonly>${esc(t.html)}</textarea></div>`;document.getElementById('propPanel').innerHTML=h;document.getElementById('tplName').textContent=t.name+' · '+(t.cat==='title'?'标题':t.cat==='generator'?'生成器':t.cat==='effect'?'特效':'转场')}
+function up(k,v){const t=gT();const p=t.props[k];if(p&&p.t==='slider')v=Number(v);data[k]=v;rPreview();const sl=document.querySelector(`input[type=range][oninput*="${k}"]`);if(sl){const n=sl.nextElementSibling;if(n&&n.classList.contains('val'))n.textContent=p.step&&p.step<1?Number(v).toFixed(2):v}}
+function selT(id){DB.cur=id;initD();DB.split=false;DB.splitVer=null;save();rAll()}
+function setCat(c){DB.cat=c;const ts=selTpls();if(ts.length&&!ts.find(t=>t.id===DB.cur)){DB.cur=ts[0].id;initD()}document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('on',b===event.target));rAll()}
+function saveVer(){const t=gT();if(!t)return;t.vers.push({ts:Date.now(),label:new Date().toLocaleString('zh-CN'),data:{...data}});save();rLeft()}
+function ldVer(i){const t=gT();if(!t||!t.vers[i])return;data={...t.vers[i].data};rPreview();rProps()}
+function rmVer(i){const t=gT();if(!t)return;t.vers.splice(i,1);save();rLeft()}
+function toggleSplit(){if(DB.split){DB.split=false;DB.splitVer=null}else{const v=document.getElementById('cmpSelect').value;if(v==='')return;DB.split=true;DB.splitVer=parseInt(v)}save();rPreview()}
+document.getElementById('cmpSelect').addEventListener('change',function(){if(!DB.split)return;DB.splitVer=this.value===''?null:parseInt(this.value);rPreview()});
+function rAll(){if(!gT()){DB.cur=DB.tpls[0]?.id;initD()}rLeft();rPreview();rProps()}
+function showNewDlg(){document.getElementById('newDlg').style.display='flex'}
+function createTpl(){const name=document.getElementById('nfName').value.trim();const cat=document.getElementById('nfCat').value;const cls=document.getElementById('nfCls').value.trim()||'tpl-'+Date.now();if(!name)return;const id='t_'+Date.now();DB.tpls.push({id,name,cat,cls,dur:5,html:'<div class="NP">'+name+'</div>',props:{text:{g:'文字',l:'文本',t:'text',d:name}},vers:[]});DB.cur=id;DB.cat=cat;initD();save();document.getElementById('newDlg').style.display='none';rAll()}
+function doExport(){const t=gT();if(!t)return;const jsName=t.cls.charAt(0).toUpperCase()+t.cls.slice(1);const sp={type:'object',additionalProperties:false,properties:{},required:[]};Object.entries(t.props).forEach(([k,v])=>{const prop={type:v.t==='slider'?'number':'string',title:v.l,default:data[k]};if(v.t==='color'){prop.gddType='color-rrggbb';prop.pattern='^#[0-9a-f]{6}$'}if(v.t==='slider'){prop.minimum=v.min||0;prop.maximum=v.max||100}sp.properties[k]=prop});sp.required.push(Object.keys(t.props)[0]);const mf={$schema:'https://ograf.ebu.io/v1/specification/json-schemas/graphics/schema.json',id:'com.hermes.'+t.cls,version:'1.0.0',name:t.name,main:jsName+'.js',supportsRealTime:false,supportsNonRealTime:true,stepCount:1,schema:sp,renderRequirements:[{resolution:{width:{ideal:1920},height:{ideal:1080}},frameRate:{ideal:25}}],v_bmd:{duration:t.dur||5}};const blob=new Blob([JSON.stringify(mf,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=jsName+'.ograf.json';a.click()}
+initD();rAll();
+</script>
+</body>
+</html>

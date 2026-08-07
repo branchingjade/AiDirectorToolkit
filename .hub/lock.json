@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "installed": {
+    "impeccable": {
+      "source": "url",
+      "identifier": "https://raw.githubusercontent.com/DevvGwardo/impeccable/main/SKILL.md",
+      "trust_level": "community",
+      "scan_verdict": "safe",
+      "content_hash": "sha256:1bb93f6fd13d6c8f",
+      "install_path": "impeccable",
+      "files": [
+        "SKILL.md"
+      ],
+      "metadata": {
+        "url": "https://raw.githubusercontent.com/DevvGwardo/impeccable/main/SKILL.md",
+        "source_url": "https://raw.githubusercontent.com/DevvGwardo/impeccable/main/SKILL.md",
+        "awaiting_name": false
+      },
+      "scan_provenance": {
+        "source": "https://raw.githubusercontent.com/DevvGwardo/impeccable/main/SKILL.md",
+        "source_url": "https://raw.githubusercontent.com/DevvGwardo/impeccable/main/SKILL.md",
+        "bundle_hash": "sha256:1bb93f6fd13d6c8fec75036358c9d76ae96cf598ff221d872006a8227e0e81cd",
+        "scanner_version": "skills-guard-v1",
+        "verdict": "safe",
+        "trust_level": "community",
+        "findings": [],
+        "rules": [],
+        "scanned_at": "2026-07-29T10:50:19.928667+00:00",
+        "summary": "impeccable: clean scan, no threats detected",
+        "fresh": true
+      },
+      "installed_at": "2026-07-29T10:50:19.941364+00:00",
+      "updated_at": "2026-07-29T10:50:19.941364+00:00"
+    }
+  }
+}

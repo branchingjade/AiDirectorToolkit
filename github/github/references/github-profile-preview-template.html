@@ -1,0 +1,149 @@
+<!--
+  GitHub 主页预览模板 — 仿暗色主题
+  用法：复制此文件到本地，修改侧边栏 Bio 和置顶仓库内容
+  打开 file:///path/to/this.html 即可预览效果
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GitHub 主页预览</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0d1117; color: #c9d1d9;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    padding: 48px;
+  }
+  .page {
+    max-width: 920px; margin: 0 auto;
+    display: grid; grid-template-columns: 260px 1fr; gap: 24px; align-items: start;
+  }
+  .sidebar {
+    background: #161b22; border: 1px solid #30363d;
+    border-radius: 8px; padding: 20px; position: sticky; top: 24px;
+  }
+  .avatar {
+    width: 220px; height: 220px; border-radius: 50%;
+    margin: 0 auto 14px;
+    display: flex; align-items: center; justify-content: center; font-size: 56px;
+    background: linear-gradient(135deg, #1a1f2e, #2d1f1f, #1a1f2e);
+    border: 1px solid #30363d;
+  }
+  .name { font-size: 22px; font-weight: 600; }
+  .login { font-size: 18px; font-weight: 300; color: #8b949e; margin-bottom: 8px; }
+  .bio { font-size: 13px; line-height: 1.7; margin: 10px 0; }
+  .accent { color: #f78166; font-weight: 500; }
+  .accent2 { color: #58a6ff; font-weight: 500; }
+  .accent3 { color: #d2a8ff; font-weight: 500; }
+  .dim { color: #8b949e; }
+  .btn {
+    width: 100%; margin-top: 8px; padding: 5px 16px;
+    border-radius: 6px; border: 1px solid #30363d;
+    background: #21262d; color: #c9d1d9; font-size: 13px; text-align: center;
+  }
+  .meta { margin-top: 10px; font-size: 12px; color: #8b949e; line-height: 1.8; }
+
+  /* Contribution Graph */
+  .contrib {
+    background: #161b22; border: 1px solid #30363d;
+    border-radius: 8px; padding: 16px; margin-bottom: 24px;
+  }
+  .contrib-title { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
+  .contrib-grid {
+    display: grid; grid-template-columns: repeat(52, 1fr);
+    grid-template-rows: repeat(7, 1fr); gap: 3px; width: 100%; aspect-ratio: 52/7;
+  }
+  .cell {
+    border-radius: 2px; background: #161b22; border: 1px solid #1c2333;
+  }
+  .cell.l0 { background: #161b22; }
+  .cell.l1 { background: #0e4429; border-color: #0e4429; }
+  .cell.l2 { background: #006d32; border-color: #006d32; }
+  .cell.l3 { background: #26a641; border-color: #26a641; }
+  .cell.l4 { background: #39d353; border-color: #39d353; }
+  .legend {
+    display: flex; align-items: center; gap: 4px; justify-content: flex-end;
+    font-size: 10px; color: #8b949e; margin-top: 8px;
+  }
+  .legend .cell { width: 10px; height: 10px; }
+
+  /* Pinned */
+  .pinned { margin-bottom: 24px; }
+  .section-label { font-size: 13px; color: #8b949e; margin-bottom: 8px; }
+  .section-label strong { color: #c9d1d9; font-weight: 600; }
+  .pinned-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .card {
+    border: 1px solid #30363d; border-radius: 6px;
+    padding: 14px; background: #0d1117; transition: border-color 0.2s;
+  }
+  .card:hover { border-color: #f78166; }
+  .repo-name {
+    font-size: 13px; font-weight: 600; color: #58a6ff;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .repo-vis {
+    font-size: 11px; color: #8b949e; border: 1px solid #30363d;
+    border-radius: 10px; padding: 0 6px; margin-left: auto;
+  }
+  .repo-desc { font-size: 12px; color: #8b949e; margin-top: 6px; line-height: 1.5; }
+  .repo-meta { margin-top: 8px; font-size: 11px; color: #8b949e; display: flex; gap: 14px; }
+  .lang-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; vertical-align: middle; margin-right: 3px; }
+  .lang-dot.orange { background: #f78166; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="sidebar">
+    <div class="avatar">🎬</div>
+    <div class="name">YOUR_NAME</div>
+    <div class="login">YOUR_USERNAME</div>
+    <div class="bio">
+      <!-- 修改这里 -->
+      YOUR_BIO_LINE_1<br>
+      YOUR_BIO_LINE_2
+    </div>
+    <div class="btn">Follow</div>
+    <div class="meta">📍 YOUR_LOCATION</div>
+  </div>
+
+  <div>
+    <!-- Contribution -->
+    <div class="contrib">
+      <div class="contrib-title">📊 贡献活动</div>
+      <div class="contrib-grid" id="grid"></div>
+      <div class="legend">
+        Less <span class="cell l0"></span><span class="cell l1"></span><span class="cell l2"></span><span class="cell l3"></span><span class="cell l4"></span> More
+      </div>
+    </div>
+
+    <!-- Pinned -->
+    <div class="pinned">
+      <div class="section-label">📌 <strong>置顶</strong></div>
+      <div class="pinned-grid">
+        <!-- 修改这里 -->
+        <div class="card">
+          <div class="repo-name">📁 REPO_NAME <span class="repo-vis">Public</span></div>
+          <div class="repo-desc">REPO_DESCRIPTION</div>
+          <div class="repo-meta"><span><span class="lang-dot orange"></span> LANG</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const grid = document.getElementById('grid');
+for (let i = 0; i < 52 * 7; i++) {
+  const col = Math.floor(i / 7), row = i % 7;
+  let w = (col / 51) * 3;
+  if (row >= 5) w *= 0.4;
+  const lvl = Math.min(4, Math.floor(Math.random() * 4 + w));
+  grid.innerHTML += `<div class="cell l${lvl}"></div>`;
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>OGraf 设计稿预览</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#111; color:#ccc; font-family:"Microsoft YaHei",sans-serif; }
+  .frame {
+    position:relative; width:1920px; height:540px; margin:0 auto 4px;
+    background:radial-gradient(ellipse at center, #2a2520 0%, #0d0b08 100%);
+    overflow:hidden;
+  }
+  .frame::after {
+    content:attr(data-label); position:absolute; top:12px; left:16px;
+    font-size:13px; color:#666; letter-spacing:2px;
+  }
+  /* ↓ 你的设计 CSS 放这里 ↓ */
+</style>
+</head>
+<body>
+
+<!-- 模板 1 -->
+<div class="frame" data-label="方案名称">
+  <!-- 你的人名条 HTML 结构 -->
+</div>
+
+<div class="controls" style="text-align:center;padding:20px;">
+  <button onclick="toggleBG()">切换背景明暗</button>
+</div>
+
+<script>
+let dark=true;
+function toggleBG(){
+  dark=!dark;
+  document.querySelectorAll('.frame').forEach(f=>{
+    f.style.background=dark
+      ?'radial-gradient(ellipse at center, #2a2520 0%, #0d0b08 100%)'
+      :'radial-gradient(ellipse at center, #e8e0d5 0%, #c8bfb0 100%)';
+  });
+}
+</script>
+</body>
+</html>

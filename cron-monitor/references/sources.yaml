@@ -1,0 +1,54 @@
+# Hermes Monitor Sources
+# 复制到 ~/.hermes/hermes_monitor_sources.yaml 后编辑
+
+sources:
+  - name: hermes-agent
+    type: github-release
+    repo: NousResearch/hermes-agent
+    enabled: true
+    channel: feishu
+    target: oc_58433ce37dc9e6ba6836da36b370fc01
+    schedule_override: null
+    llm_level: 3
+    max_items: 2
+    include_categories:
+      - security
+      - windows
+      - desktop
+      - cli
+      - tools
+      - core
+      - dashboard
+    exclude_keywords:
+      - discord
+      - slack
+      - telegram
+      - whatsapp
+      - signal
+      - matrix
+      - imessage
+      - photon
+      - bluebubbles
+      - docker
+      - nix
+      - linux-only
+      - macos-only
+      - darwin
+
+  # 示例：RSS 博客监控
+  # - name: some-blog
+  #   type: rss
+  #   feed_url: https://example.com/feed.xml
+  #   enabled: false
+  #   channel: feishu
+  #   target: oc_58433ce37dc9e6ba6836da36b370fc01
+  #   llm_level: 2
+
+  # 示例：自定义命令
+  # - name: custom-check
+  #   type: custom-command
+  #   command: curl -s https://api.example.com/status
+  #   enabled: false
+  #   channel: feishu
+  #   target: oc_58433ce37dc9e6ba6836da36b370fc01
+  #   llm_level: 1
