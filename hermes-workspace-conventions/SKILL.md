@@ -299,13 +299,31 @@ venv/Scripts/python.exe -m pip install --force-reinstall charset-normalizer
 
 `read_file` 对 .md 报 "Binary file - cannot display as text"（Obsidian UTF-8 中文文件普遍）的根因：`head -c 1000` 采样在 1000 字节边界切断 UTF-8 多字节字符 → 解码产生 **1 个** U+FFFD → 旧判定 `if "\ufffd" in sample` 见 1 个就判 binary。**与 CRLF 无关**（`\r` 本来就被排除在 non-printable 外）。真解码失败（如 GBK 读 UTF-8）产生几十个 U+FFFD——判定阈值区分截断噪声与真失败。已本地补丁 `tools/file_operations.py` 的 `_is_likely_binary`：改为 `content_sample[:1000].count("\ufffd") > 1`。⚠️ `hermes update` 会覆盖补丁，升级后需重打；复现时临时读法 `tr -d '\r' < 文件` 管道（grep/sed 直接处理 CRLF 文件本身没问题）。上游值得提 PR：判定注释假设"合法 UTF-8 文本不含 U+FFFD"在截断采样下不成立。
 
-### Windows 计划任务跑控制台程序必弹窗（pythonw 解法，2026-08-07 实测）
+### Windows 计划任务跑控制台程序必弹窗（pythonw 解法 + AllocConsole/UIPI 三层坑，2026-08-07 实测）
 
-计划任务「登录时」交互运行 python.exe 会弹 cmd 窗口（如 `HermesRemoteServe` 远程网关）。解法：任务执行程序换成 **`pythonw.exe`**（venv\Scripts\pythonw.exe 默认存在）——无窗口且不影响 stdout 重定向（`> serve_remote.log 2>&1` 在 cmd 层重定向后 Python 正常初始化 sys.stdout）。注意：serve 进程内部可能重新 exec 成 python.exe（tasklist 显示 python.exe），但继承 pythonw 的无控制台句柄，仍不弹窗。无窗口后排障靠日志文件。改任务用 `schtasks /change /tn <任务> /tr "cmd /c cd /d <dir> && venv\Scripts\pythonw.exe -m ... > log 2>&1"`；git-bash 里 `git -C ~/Documents/...` 可能报 No such file（MSYS 路径不被 git.exe 识别）——用 `cd` + Windows 路径（`C:/...`）规避。
+计划任务「登录时」交互运行 python.exe 会弹 cmd 窗口（如 `HermesRemoteServe` 远程网关）。完整三层坑与解法：
+
+**① cmd /c 壳弹窗**：任务动作包 `cmd /c ...` 时 cmd 本身是控制台程序，登录自启即显示窗口并常驻（serve 常驻则窗口不消失，标题「选择 C:\WINDOWS\system32\cmd.EXE」）。解法：任务动作直接 `pythonw.exe`（venv\Scripts\pythonw.exe 默认存在）+ 参数 + 起始于(WorkingDirectory)=运行目录，不用 cmd 壳。改任务：`Set-ScheduledTask -Action (New-ScheduledTaskAction -Execute <pythonw全路径> -Argument "..." -WorkingDirectory <dir>)`。
+
+**② pythonw 内部 AllocConsole 自建窗口**：pythonw 是 GUI 子系统本不该有控制台，但 hermes launcher/某 C 扩展会调 AllocConsole 凭空造出 conhost 黑窗口（标题「选择 C:\...\pythonw.exe」、类名 ConsoleWindowClass，内容=serve 的 stdout）——启动 flags 挡不住进程内部自建窗口。解法：守卫脚本 `scripts/hide_hindsight_window.py`（每 2 秒 EnumWindows 轮询，标题含 `hermes-agent\venv\Scripts\pythonw.exe` 就 SW_HIDE），计划任务 Hermes-HideHindsightWindow 登录时触发。
+
+**③ UIPI 拦截（最隐蔽）**：serve 任务 RunLevel=Highest（管理员），守卫任务 RunLevel=Limited 时，**守卫枚举得到窗口但 GetWindowText 读不到高完整性窗口的标题**（UIPI 静默拦截）→ MARKER 匹配不上 → 隐藏无效（实测 Limited 守卫只隐藏了它自己的窗口，serve 窗口纹丝不动；守卫任务改为 Highest 后立即可隐藏）。**守卫任务 RunLevel 必须与 serve 一致（Highest）**。验证法：SW_SHOW 窗口后等 5 秒看守卫是否重新隐藏。
+
+无窗口后排障靠日志文件；git-bash 里 `git -C ~/Documents/...` 可能报 No such file（MSYS 路径不被 git.exe 识别）——用 `cd` + Windows 路径（`C:/...`）规避。
 
 ### 管理员进程看不到用户级映射盘符（UAC）
 
 Hermes 终端以管理员权限运行时，`net use` / `Get-PSDrive` 看不到普通用户会话里映射的网络驱动器（Y:/Z: 等），`\\主机\共享` UNC 直接访问也失败（系统错误 5 拒绝 / 67 找不到网络名），而普通软件正常——根因是 UAC 下提升进程与用户会话的链接未建立。诊断：`HKCU\Network\<盘符>` 的 RemotePath 字段可确认映射本体是否存在。修复：注册表 `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\EnableLinkedConnections = 1`（DWORD），**注销或重启后生效**（登录时才创建链接，当前进程立即验证仍不可见属正常）。修复前兜底：SFTP/SSH 直连数据源（如 NAS）。
+
+### Windows 计划任务默认非提权：WMI 读不到进程 CommandLine（2026-08-07 实测）
+
+计划任务（`schtasks /create`）默认 `RunLevel=LeastPrivilege`。非管理员上下文中 `Get-CimInstance Win32_Process` **能枚举进程（PID/名称正常），但读取其他进程的 `CommandLine` 属性返回空字符串**（WMI 安全遮罩）——不报错、不抛异常，静默为空。后果：任何靠 `CommandLine -match 'xxx'` 判断进程存活的检测（watchdog/守护脚本）在计划任务里**永远判定「进程不存在」**，表现为持续误报+重复拉起（gateway_watchdog 曾 8 小时 15 次假宕机记录，gateway 实际一直健康）。
+
+排查铁证法：手动终端（管理员）与计划任务各跑一次同一 PowerShell 命令，对比 stdout——管理员能读到 CommandLine，计划任务返回空。复现计划任务环境用临时探测任务（`schtasks /create` + `/run`）把输出重定向到文件；引号嵌套地狱时写个 .py 探测脚本落盘，别在 schtasks /tr 里内联引号。
+
+修复（二选一，推荐都做）：
+1. **计划任务提权**：XML 注册并设 `<RunLevel>HighestAvailable</RunLevel>`（`schtasks /create /tn <名> /xml task.xml /f`；注意枚举值是 `HighestAvailable`，写 `Highest` 会报 schema 错）。验证：`[xml]$x=schtasks /query /tn <名> /xml | Out-String; $x.Task.Principals.Principal.RunLevel` 返回 HighestAvailable
+2. **检测改用端口信号**：进程监听端口（`netstat -ano` 查 LISTENING）不依赖 CommandLine 读取权限，比命令行匹配可靠（gateway 用 8644 webhook 端口作主判据；中文 Windows netstat 输出 GBK，subprocess 要 `errors="replace"`）
 
 ### 大文件 tool call 流超时
 
@@ -331,6 +349,13 @@ Hermes 终端以管理员权限运行时，`net use` / `Get-PSDrive` 看不到�
 2. 发现内容已存在且一致 → 只补缺口（如本会话补 E2E 实测结果），不重写全文
 3. 无法确认来源的更新，如实向用户披露（"不是我写的，判断是并行会话"），不假装是自己写的
 4. **并行会话的 `git add -A` 会把你的未提交改动一起带走**（2026-08-07 实测：patch 完 _模板.md 后 commit 提示 "Everything up-to-date"，git log 里出现非本会话 commit——并行会话 commit 时 add -A 把模板改动一并打包）。判据：git status 干净但 git log 有陌生 commit + 自己没提交过 → `git show <commit> -- <file>` 验证改动已在 HEAD，无需重复提交
+5. **并行会话仓库只推自己的单文件 → 用隔离临时分支，别 rebase/merge**（2026-08-07 实测：skills 正本仓库远端有并行会话大批量提交如知识库 v1.18.0 30 子代理，本地 master 还残留并行会话未推送提交。此时 `git pull --rebase` / `git merge` 必然撞冲突，且冲突文件全是别人的活，解了就是污染别人的提交）。正确姿势：
+   - `git stash push -u -m "收尾临时stash-并行会话改动"`（先保护并行会话的未提交改动，否则 checkout 被拒）
+   - `git checkout -b tmp-push-<名> origin/master`（基于远端最新建临时分支，不碰本地 master）
+   - `cp` 自己的文件到临时分支 → `git add` + `git commit`
+   - `git push origin tmp-push-<名>:master`（fast-forward，远端无分叉才推得动）
+   - `git checkout master` → `git branch -D tmp-push-<名>` → `git stash pop` 还原并行会话改动
+   - 验证：`git fetch origin && git show origin/master:<路径>` 确认远端到位（CRLF 差异属正常，diff 只看内容）
 
 ### 并行 terminal 调用共享 shell 状态
 
@@ -431,6 +456,7 @@ p.write_text(text)
 | 文件 | 内容 |
 |------|------|
 | `references/cron-delivery-patterns.md` | Cron 投递模式 |
+| `references/feishu-cron-delivery-99992402.md` | **飞书 cron 投递失败 [99992402] 排障** — deliver=origin + 话题 thread_id → post 消息被拒的根因链/判定/修复（2026-08-07 实测），含 lark-cli 排障工具链 |
 | `references/identity-and-memory-files.md` | SOUL.md/USER.md/MEMORY.md 角色区分 |
 | `references/session-classification.md` | 会话分类指南 |
 | `references/session-grouping-mechanism.md` | 会话侧边栏分组机制 |
