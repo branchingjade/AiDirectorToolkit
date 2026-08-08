@@ -268,6 +268,12 @@ scope = 影响范围（日志|图谱|知识库|规范|自检|飞书|犬子无双
 
 不要把 API 返回值当作唯一真相来源。当用户在同一系统上通过其他途径（浏览器、CLI）已成功操作时，API 报错更可能是请求构造问题而非凭据问题。验证顺序：用户浏览器状态 > CLI 直接输出 > API 响应。反面案例：alist API 登录返回 400，断言「密码不对」要求重置——但用户早已在浏览器登录成功。
 
+### 验证未完不下定论（2026-08-08 用户纠正「等验证后在做决定」）
+
+评估类任务（能否砍掉 X 层 / 是否打通 / 方案是否可行）**在验证完成前禁止下结论并固化**——具体表现为三不要：不要删监控设施（验证 cron）、不要把结论写死进 memory、不要向用户宣布「已定论」。反面案例（Hindsight 飞书 recall 验证）：consolidation 未消化完 + 默认工具 recall 只显前几条时，过早写 memory「Obsidian 保留不砍」，用户纠正「等验证后在做决定」；次日 limit=60 全量验证推翻结论。正确节奏：验证未完期间结论状态保持「验证中」→ 验证完成后才落定论 → 再删监控/改 memory。
+
+**子代理/cron 自报不可信**：cron 自动验证报告「打通成功」是自报，必须独立复验（直接调数据层 API，不依赖子代理转述）。验证链从硬到软：数据层入库（memories/list 关键词命中）→ 全量 recall（加大 limit 看排序）→ 才下结论。默认工具 recall 的截断结果不算数。
+
 ### 行为规则不触发陷阱
 
 Memory 处于系统提示「背景知识」层，agent 任务中注意力在 skill 上，不会主动扫描 memory 找 checklist。**行为指令放 skill，决策知识放 memory。** 已执行：行为铁律从 memory 搬到本 skill，memory 从 19 条精简到 7 条。
@@ -356,6 +362,7 @@ Hermes 终端以管理员权限运行时，`net use` / `Get-PSDrive` 看不到�
    - `git push origin tmp-push-<名>:master`（fast-forward，远端无分叉才推得动）
    - `git checkout master` → `git branch -D tmp-push-<名>` → `git stash pop` 还原并行会话改动
    - 验证：`git fetch origin && git show origin/master:<路径>` 确认远端到位（CRLF 差异属正常，diff 只看内容）
+6. **并行会话共同编辑同一飞书文档 → block_insert_after 锚点必须先 XML 验证（2026-08-07 实测翻车）**：多会话同时改飞书正本（NSZK）时，`block_insert_after` 用的锚点 block id 可能已不是你以为的位置——实测：想插到第五部分"人物设计"后，误用了第三部分人物小传里的 li 作锚点（block id 复用/结构漂移），新章节被插进陆青山小传内部（外形 li 和性格 li 之间），把人物小传劈成两半。修复=删 52+1 个错位 block（`block_delete --block-id 逗号分隔` 批量）+ 恢复小传连续性。**规避**：①插入前用 `docs +fetch --scope full --detail with-ids --doc-format xml` 拉最新 XML，**打印锚点 block 的完整上下文确认它在目标章节内**（只看 id 不看内容=踩坑）；②插入后立即 `docs +fetch --scope full` 检查章节顺序（h2 出现次序），不只查关键词在位；③同文档并行编辑时，若发现文档字符数/结构异常变化（如 9,979→18,199 字符），先确认并行会话是否已加了同类内容——**内容重叠时保留更完整的一版，删自己插错的一版**（本次：并行 v2.1.4 参考片单比我 v2.1.3 简版完整，删简版留详版）
 
 ### 并行 terminal 调用共享 shell 状态
 
@@ -469,7 +476,7 @@ p.write_text(text)
 | `references/postmortem-methodology.md` | **任务复盘方法论** — 13个维度深度复盘框架 |
 | `references/lark-cli-doc-edit-pitfalls.md` | **lark-cli 文档编辑陷阱** — str_replace 跨 block 静默失败 + block 操作正确姿势（2026-08-06 实测） |
 | `references/memory-providers.md` | 外部记忆提供者 8 个对比（Honcho/Mem0/Holographic/OpenViking…）— 本地 vs 云 + 隐私选择建议 + **Hindsight 本地嵌入式二次安装定稿**（curses 向导坑/手动配置三件套，2026-08-06） |
-| `references/hindsight-ops-diagnostics.md` | **Hindsight 运维诊断**（2026-08-07 实测）— recall 搜不到≠没 retain（consolidation 积压是真因，recall_types=observation 只召回已提炼事实）；路径/端口/日志速查；飞书→Hindsight 天生打通（gateway 飞书 agent 自动挂 provider，无需改代码） |
+| `references/hindsight-ops-diagnostics.md` | **Hindsight 运维诊断** — recall 搜不到≠没 retain（consolidation 积压是真因，recall_types=observation 只召回已提炼事实）；路径/端口/日志速查；**数据层验证 API**（stats/memories/list/recall+limit，2026-08-08）；飞书→Hindsight 天生打通；**验证定稿**：飞书项目记忆可靠 Hindsight，Obsidian 项目记忆层可降级为 git 归档，画像/路由/名单仍留 Obsidian |
 | `references/feishu-collab-health-check.md` | **飞书协作健康度巡检** — 五面检查（画像库/路由表/项目记忆/cron/双通道活跃度）+ 常见发现判据 + **修复层指引**（路由 chat_id 反查、多项目成员豁免keys、话题key双后缀、健康脚本用法、摘要补评论通道）（2026-08-07 实测） |
 | `scripts/hindsight-e2e-check.py` | **Hindsight 记忆 provider 端到端验证脚本** — retain→consolidation→recall 闭环探测（方法名/异步时序/venv 用法全内置） |
 | `scripts/cleanup-projects.py` | 项目清理脚本 |
