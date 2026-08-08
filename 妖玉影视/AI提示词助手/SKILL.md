@@ -1,11 +1,11 @@
 ---
 name: AI提示词助手
-description: "【泛用工具】AI提示词助手 v1.5.1。Seedance 2.0 提示词写作约束的主本（canonical source）。AI短剧导演助手和AI短剧编剧助手的提示词约束均从此同步。将用户提供的剧情描述/剧本片段/小说段落转化为可直接用于Seedance 2.0生成的影视级提示词。仅含提示词写作约束+动作设计，不含完整分镜产出流程。Trigger: 优化提示词/改写提示词/润色提示词"
-version: 1.5.1
+description: "【泛用工具】AI提示词助手 v1.5.2。Seedance 2.0 提示词写作约束的主本（canonical source）。AI短剧导演助手和AI短剧编剧助手的提示词约束均从此同步。将用户提供的剧情描述/剧本片段/小说段落转化为可直接用于Seedance 2.0生成的影视级提示词。仅含提示词写作约束+动作设计，不含完整分镜产出流程。Trigger: 优化提示词/改写提示词/润色提示词"
+version: 1.5.2
 tags: [seedance, prompt-optimizer, video-generation, cinematic, canonical-constraints]
 ---
 
-# AI提示词助手 v1.5.1
+# AI提示词助手 v1.5.2
 
 > **约束规则主本**：本文档一至五章为 Seedance 2.0 提示词写作约束的唯一权威来源。AI短剧导演助手和AI短剧编剧助手的约束章节从此同步。修改约束时，必须同步到另外两个 Skill。
 
@@ -22,6 +22,7 @@ tags: [seedance, prompt-optimizer, video-generation, cinematic, canonical-constr
 优化提示词前（`skill_view(name='妖玉影视知识库', file_path='...')`）：
 1. 判断本段素材的场景类型（打斗/情感/妖异类/留白/反转…）→ 查检索表 → 读对应大师技法卡片
 2. 核心招式速查 16 条默认在场——把招式翻译成画面约束（如"同镜反转"→"一镜到底，不切镜头，变形全程可见"、"最轻动作"→"镜头停在手上，不推脸"、"声轨缺席"→"此段无配乐，只有环境声"）
+3. 本段涉及哪个制作学科（色彩/光影/构图运镜/声音/视效）→ 查制作学科库索引 → 读对应学科密码（`制作学科/<学科>设计密码.md`）——学科密码的「AI 提示词对接」节直接给 Seedance 落地模板（配色/光线/运镜/声音符号/特效防穿帮）
 
 > 约束主本声明不变：一至五章为 Seedance 2.0 提示词写作约束唯一权威来源。
 
@@ -265,6 +266,6 @@ tags: [seedance, prompt-optimizer, video-generation, cinematic, canonical-constr
 
 当本SKILL被加载后，输出：
 
-> Seedance 提示词优化器 v1.5.1 已就绪。粘贴你的提示词或剧情描述，我来优化。
+> Seedance 提示词优化器 v1.5.2 已就绪。粘贴你的提示词或剧情描述，我来优化。
 > 我会检查：文学化修辞 / 精确数值 / 动作完整性 / 焦点转移 / 木偶化风险 / 音效补全。
 > 输出格式：景别运镜自然语言开头，焦点转移融入描述行，音效作为物理描述自然融入。
