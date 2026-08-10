@@ -1,6 +1,6 @@
 ---
 name: impeccable
-description: "Comprehensive frontend design skill — 23 commands for shaping, auditing, polishing, and refining UI. Use when the user wants to design, redesign, shape, critique, audit, polish, clarify, distill, harden, optimize, adapt, animate, colorize, extract, or improve a frontend interface. Covers websites, landing pages, dashboards, product UI, app shells, components, forms, settings, onboarding, empty states. Handles UX review, visual hierarchy, info architecture, cognitive load, accessibility, performance, responsive behavior, theming, anti-patterns, typography, fonts, spacing, layout, alignment, color, motion, micro-interactions, UX copy, error states, edge cases, i18n, and reusable design systems/tokens. Also use for bland designs needing boldness, loud designs needing quiet, live browser iteration, or ambitious visual effects. Not for backend-only or non-UI tasks."
+description: "Comprehensive frontend design skill — 23 commands for shaping, auditing, polishing, and refining UI. Use when the user wants to design, redesign, shape, critique, audit, polish, clarify, distill, harden, optimize, adapt, animate, colorize, extract, or improve a frontend interface. Covers websites, landing pages, dashboards, product UI, app shells, components, forms, settings, onboarding, empty states. Handles UX review, visual hierarchy, info architecture, cognitive load, accessibility, performance, responsive behavior, theming, anti-patterns, typography, fonts, spacing, layout, alignment, color, motion, micro-interactions, UX copy, error states, edge cases, i18n, and reusable design systems/tokens. Also use for bland designs needing boldness, loud designs needing quiet, live browser iteration, or ambitious visual effects. Not for backend-only or non-UI tasks. 规范依据（对比度/动效/布局/组件/表单/无障碍的权威出处）见「前端设计知识库」skill，命令执行前先查其速查表。"
 author: Paul Bakaus (pbakaus/impeccable) — ported to Hermes Agent
 license: Apache 2.0
 metadata:
@@ -12,6 +12,8 @@ metadata:
 # Impeccable — Frontend Design Skill
 
 Designs and iterates production-grade frontend interfaces. Real working code, committed design choices, exceptional craft.
+
+> **先查库**：执行任何命令前，先加载 `前端设计知识库` skill 查规范速查表（交互六套/动效参数/对比度/组件选择/表单/状态四态，全部带权威出处 NN/g、Material、WCAG、Fluent）。本 skill 管「怎么执行」，知识库管「该按什么标准」。
 
 Based on [pbakaus/impeccable](https://github.com/pbakaus/impeccable) (Apache 2.0), which builds on Anthropic's frontend-design skill.
 
