@@ -20,6 +20,7 @@ version: 1.0.0
 
 | 阶段 | 做什么 | 用哪个 skill |
 |------|--------|-------------|
+| 0. 查库 | **先加载 `前端设计知识库`**——拿规范骨架：交互六套/动效参数/对比度/组件选择/状态四态，全部带权威出处 | `前端设计知识库`（土壤层，必查） |
 | 1. 参考 | 确定视觉语言：色板、字体、间距、组件风格 | `popular-web-designs` 加载目标品牌模板 |
 | 2. 生成 | 写初版 HTML/CSS，不求完美 | `claude-design` 或 `sketch` |
 | 3. 评审 | 找出问题：层次、密度、对齐、AI 套路 | `impeccable:critique` + `impeccable:audit` |
@@ -28,6 +29,7 @@ version: 1.0.0
 
 ## 关键 pitfall
 
+- **阶段 0 不可跳。** `前端设计知识库` 是土壤层——交互逻辑/动效数值/对比度标准/组件选择都从那来，跳了=凭感觉设计。查库后两种结论都有效：发现可优化点就落地，确认已达标就留档。
 - **不要停在阶段 2 就交差。** 没有 3-5，2 的产出一定是 AI 味垃圾。用户原话："没什么感觉呢，做出来的东西很烂"——就是停了。
 - **用户说"用 skill"= 加载全部相关 skill，不是挑几个。** 反面案例：用户说"用前端设计的几个 skill 出方向"，只加载了 sketch + claude-design，漏了 impeccable（评审/打磨）和 popular-web-designs（参考）。用户追问"用 skill 了嘛"并命令"从 0 设计，用上所有能用的 skill"——根因不是少做一个步骤，是没有把完整工具链拉起来。impeccable 的 critique/typeset/layout/colorize 命令、claude-design 的 surface-first 和 slop-diagnostic、sketch 的 intake→variants→head-to-head 流程——少一个都会导致产出停在"能看但没打磨"的状态。
 - **上下文够了≠跳过阶段 1（参考）。** 即使项目风格已知，参考阶段的价值不是在"发现新的参考"，是在"把视觉锚点写下来迫使 agent 在设计前 commit 到一个具体的色彩/材质/字体方向"。反面案例：第一次出 3 个方向（公告栏/金漆匾额/搪瓷标语），用户看了说"从 0 设计"——因为这 3 个是在没有 impeccable 的 color strategy + surface-first 约束下生成的，方向散、没根。

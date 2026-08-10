@@ -186,7 +186,20 @@ scope = 影响范围（日志|图谱|知识库|规范|自检|飞书|犬子无双
 5. **历史档案归属判断（2026-08-07 用户纠正定稿）**：多人共事同一项目时（如三人同做陈强系列）行为特征高度同质，**agent 按行为特征猜映射会错**（实测：猜 A=全志越/B=施文皓/C=苑津铭，用户拍板 A=苑津铭/B=全志越/C=施文皓）。正确姿势：① 调出各人提交的**原始提示词内容样本**（state.db 提取 user 消息，按人分档）给用户认人——内容风格（贴剧情场景求优化 vs 格式化资产绑定 vs 贴故事原料）比抽象特征更有辨识度；② 归属由用户拍板，agent 不自行定稿；③ 档案文件保留「归属已定稿 + 拍板日期」溯源。
 6. **归属合并必须全量展开（2026-08-07 用户「合并进去了吗」纠正）**：用户拍板归属后，把档案内容合并进画像**必须逐条完整展开**（档案每条观察一行 + 会话清单），不能只留概要行 + 链接——概要版会被用户追问「合并进去了吗」打回重做。合并后 grep 旧标注残留（「未确认/待确认」）清零。
 7. **通道标签禁令（2026-08-07 用户纠正「所有人都会走im也都会走评论的」）**：**禁止给成员贴「走XX通道」标签**——IM 和文档评论两个通道人人可用，不存在某人专属某通道。成员某时段只有评论活动 = 「该窗口期活动集中在评论」，不是「他是评论通道用户」。**活跃度统计必须双通道合并**：IM（state.db sessions 表）+ 评论（`_hermes/评论会话/*.json`）——只看 IM 会漏掉评论为主的成员（实测：杨璇 IM 0 会话但评论 1 线程）。完整巡检流程见 `references/feishu-collab-health-check.md`。
-5. **项目记忆文件结构（2026-08-07 首落库定稿）**：`_hermes/项目记忆/<项目>.md` 用三节布局——`## 世界观`（世界设定/角色体系/关键决策）、`## 进度`（按日期列各线进展）、`## 协作`（工具链/团队工作流事实）；每条 `- [YYYY-MM-DD] 内容` 带日期；frontmatter 含 `项目: <名>` + `updated` + `tags: [飞书协作, 项目记忆]`。README 的项目列表表每新增一文件同步补一行（wikilink 到文件）。
+
+**实时通道修复（2026-08-08 用户拍板「要让实时通道真正跑起来」）**：画像是**理论实时、实际 cron**——源码有实时钩子（gateway/run.py 每轮飞书回复后剥离 `OBSERVATION:` 标记 → `record_observation()` 写画像），但实测日志 `Observation recorded` 零命中，10 条飞书回复无一条带标记（agent 从不主动输出）。修复三件套：
+1. **上限源码未同步**：`OBSERVATION_DAILY_MAX` 原为 2，用户 08-07 已拍板「不设条数上限」但源码没改——改成 999（改常量即可，沉淀规则仍按「同日同类合并去重」）
+2. **提示词无示例不触发**：原提示「如果体现了稳定偏好就加一行」太弱，agent 默认认为自己没观察到。强化为：明确可观察类别（沟通风格/格式偏好/工作方式/擅长领域/项目角色）+ 给 2 个示例行 + 「宁可多写不要漏」。改在 gateway/run.py 的 `combined_ephemeral` 注入段
+3. **读侧缺失**：评论通道有 `=== 成员画像 ===` 注入（feishu_comment.py:1147），但 IM 通道完全不注入——画像写了没人读。在 gateway/run.py FEISHU 分支加读侧：回复前 `get_profile(user_id)` 注入画像（空模板自动跳过，用与健康检查相同的占位词过滤逻辑）。**实现（2026-08-08）**：空模板过滤抽成公共函数 `collab.get_profile_meaningful(open_id)`（feishu_comment_collab.py），IM（gateway/run.py）与评论（feishu_comment.py）两通道共用；判定逻辑与健康检查脚本的占位词一致（待沉淀/待后续沉淀/暂无 bot 观察到/NAS SMB 共享账号/共享账号用户 + 排除 `#`/`>`/`---` 结构行）。**画像用途定调（用户原话）**：画像真正的用途是让 bot 更了解成员、知道怎么更好地帮助大家做好项目；来源标注不重要，是**排查用的**——画像正确时忽略来源，画像不正确时反查来源定位问题（来源标注保留但只标「档案归位」粗粒度，bot 观察默认不标）。
+
+**画像结构（2026-08-08 定稿，方案 B + frontmatter 精简）**：三章节=沟通偏好（怎么说话/格式偏好/反馈方式）+ 擅长领域（**能力结论**：从协作备注多次事件提炼的稳定能力，每条带证据锚点；沉淀规则：同一能力出现≥2次升级到此）+ 协作备注（原始事件流水含日期，不设上限）。**frontmatter 只留基础设施**：open_id/updated/tags——`专长`/`角色`/`参与项目`/`身份` 全部删除（专长与擅长领域双写、角色与成员名单.json 的 role 重复、参与项目是动态状态由路由管、身份是稳定事实自然沉淀进正文观察记录）。画像=观察沉淀的纯文本，不设手写元数据字段；身份/角色/项目信息由观察记录承载（如"妖玉确认魏宁馨是魔王导演"在协作备注）。**不要**：单独拆观察记录层（协作备注本身就是流水）、陈旧提示（画像记稳定偏好，30 天未更新≠失效，活跃度是健康检查【1】的事）、细粒度来源标注。
+
+**cron 对画像的职责 = 沉淀 + 勘误（2026-08-08 用户拍板「cron应该是沉淀、勘误等作用吧」）**：实时通道（OBSERVATION 标记）是画像的**主要写入来源**；cron 不是画像来源，是**补漏沉淀 + 纠偏**。两个 cron 的分工：
+- **每日摘要（22:00，job 88ab7ff66681）步骤6 = 沉淀 + 矛盾检测**：写入前先读画像文件比对——无冲突按规则写（能力类观察首次进协作备注，同能力≥2次升级进擅长领域）；画像不存在按 `_模板.md` 自动创建；**发现矛盾（新观察与已有内容明显冲突）→ 不直接写**，回复末尾标 `⚠️ 画像冲突待确认：<成员名> — <新观察> vs <画像已有>`，等妖玉确认
+- **健康检查（周日，job 4da8374c0b69）步骤3 = 定期勘误复核**：对活跃成员抽查画像 vs 近期会话，发现过时/不符 → 标 `⚠️ 画像勘误建议：<成员名> — <画像现状> vs <近期实际>`；**只建议不直接改**（画像由观察沉淀，修正权在妖玉）。**2026-08-08 新增反馈闭环三块**：脚本 3b 画像使用率（gateway 注入日志统计，`[Feishu-Collab] Profile injected for` 标记）、3c 画像生命周期（活跃画像 >14 天未更新 stale / >30 天无活动冷却）、3d 画像时效匹配（画像 mtime vs 最近活动时间）——详见 `references/profile-maturity-framework.md` 标准⑥
+- 空模板（待沉淀）≠ 故障：健康检查识别为 ⚠️ 但归「待沉淀」类，无需干预
+- 勘误定位（用户原话）：来源标注是**排查用的**——画像正确时忽略，画像不正确时反查来源定位问题
+5. ~~**项目记忆文件结构（2026-08-07 首落库定稿）**：`_hermes/项目记忆/<项目>.md` 用三节布局……~~ ⚠️ **已废弃 2026-08-08**：`_hermes/项目记忆/` 已删除（Hindsight 取代），此结构仅存在于 git 历史。现行机制见「记忆层级」章节 + `references/hindsight-ops-diagnostics.md`「删除落地三件套」。
 
 ### 飞书/Obsidian 双平台文档关系（2026-08-07 用户纠正定稿：飞书是正本）
 
@@ -252,6 +265,8 @@ scope = 影响范围（日志|图谱|知识库|规范|自检|飞书|犬子无双
 
 **定稿（2026-08-07 用户拍板：删除自建项目记忆层，全面用 Hindsight）**：Obsidian 的 `项目记忆.md` 文件已删除，`.hermes.md` 项目记忆工作流章节已改为 Hindsight 说明。**项目记忆 = Hindsight 外部记忆**（会话细节自动 retain/recall），agent 不再手动维护项目记忆文件。Obsidian 项目目录仍保留创作成果本体（剧本/分场分析/复盘/自审报告，git 归档）——那是资产不是记忆层。飞书评论协作的「注入主文档+复盘」机制保留（源码层，多用户安全设计，与自建层无关）。
 
+**最终执行（2026-08-08 验证通过后落地）**：`_hermes/项目记忆/` 目录直接删除（用户拍板「那就只是删掉吧」），`record_project_memory()` 改 no-op 防自动重建，PROJECT_MEMO 提示模板移除，MOC 引用更新——完整三件套见 `references/hindsight-ops-diagnostics.md`。现行 Obsidian `_hermes/` 只保留：画像/路由/名单/评论会话/memory 镜像（Hindsight 单 bank 无用户隔离，替代不了这些）+ **补丁管理/**（2026-08-08 新增：Hermes 本地源码补丁统一管理正本——hermes-local-patches.diff + 新文件备份 + reapply-patches.py + README，纳入 Obsidian git+云备份；重打方法与管理规则见 hermes-maintenance skill「标准保险做法」节）。
+
 ### 摩擦不对称陷阱
 
 `memory` 工具零摩擦（一行搞定），`skill_manage` 需匹配 old_string。agent 认知负荷高时总结冲动自然流向 memory。缓解：完成 skill 升级后自检 memory；用户可随时命令「检查 memory」。Feature request: [#70488](https://github.com/NousResearch/hermes-agent/issues/70488)。
@@ -307,6 +322,8 @@ venv/Scripts/python.exe -m pip install --force-reinstall charset-normalizer
 
 ### Windows 计划任务跑控制台程序必弹窗（pythonw 解法 + AllocConsole/UIPI 三层坑，2026-08-07 实测）
 
+⚠️ **第三实例（2026-08-09）**：`Hermes_Gateway_Watchdog`（每 5 分钟跑 gateway_watchdog.py）当初直接用 `python.exe` 作为 Execute——python.exe 自带控制台窗口，任务每次触发就闪一个黑窗，用户问「总有一闪而过的窗口是不是 hindsight」（hindsight 守卫正常，排除）。排查法：`Get-ScheduledTask | Where-Object {$_.TaskName -match 'Hermes'}` + `Triggers.Repetition.Interval` 看触发频率（PT5M 即每 5 分钟），`Actions.Execute` 看是否 python.exe。修复：`Set-ScheduledTask -Action (New-ScheduledTaskAction -Execute <pythonw全路径> -Argument ...)`，验证 `Start-ScheduledTask` 后 `Get-ScheduledTaskInfo` 的 `LastTaskResult=0`。**凡计划任务跑 .py 脚本，Execute 一律直接 pythonw.exe，不用 python.exe 也不包 cmd /c。**
+
 计划任务「登录时」交互运行 python.exe 会弹 cmd 窗口（如 `HermesRemoteServe` 远程网关）。完整三层坑与解法：
 
 **① cmd /c 壳弹窗**：任务动作包 `cmd /c ...` 时 cmd 本身是控制台程序，登录自启即显示窗口并常驻（serve 常驻则窗口不消失，标题「选择 C:\WINDOWS\system32\cmd.EXE」）。解法：任务动作直接 `pythonw.exe`（venv\Scripts\pythonw.exe 默认存在）+ 参数 + 起始于(WorkingDirectory)=运行目录，不用 cmd 壳。改任务：`Set-ScheduledTask -Action (New-ScheduledTaskAction -Execute <pythonw全路径> -Argument "..." -WorkingDirectory <dir>)`。
@@ -335,6 +352,16 @@ Hermes 终端以管理员权限运行时，`net use` / `Get-PSDrive` 看不到�
 
 `write_file` 或 `patch` 单次传超过 ~8K tokens 的 HTML/CSS 时，流可能超时静默丢弃。Hermes 不报错，但文件未被写入，且后续依赖该文件的操作（如 `docker compose build`）看似成功实则跑了旧代码。解决方案：HTML 内容拆到独立 `page.html`（不在 `main.py` 内嵌），用多次小 `patch`（每次 <4K tokens）分块写入。按顺序：CSS 骨架 → CSS 组件 → HTML 结构 → JS 逻辑 1 → JS 逻辑 2，每块独立 patch。
 
+### 多轮 patch 编辑后必须全文件复读验证（标题被吞/段落重复）
+
+多轮 patch 编辑同一文件时两类静默事故（2026-08-08 实测，声音设计密码写作）：
+1. **用标题行作锚点插入内容，new_string 漏掉标题** → 标题被整体替换掉（「六法翻译表」标题消失，表格裸奔）。修法：锚点行必须原样保留在 new_string 里，插入内容放它前面。
+2. **同一段落被插入两次**（第一次 patch 加了段，后续 patch 又在旧位置再插一遍）→ 文件出现重复段落（实测「2.5 专属增强」重复）。修法：多轮 patch 结束后 `read_file` 全文件通读一遍，并 `grep -c "章节标题" 文件` 查重（计数 2 即重复）。
+
+### 中文文档体积预算（UTF-8 3 字节/字）
+
+给中文 markdown 设体积目标时先换算：UTF-8 中文每字 3 字节，「12-18KB」目标 ≈ 4-6K 汉字。覆盖点多（12 个主题点+每节带来源）时容易超 30%（实测 24.3→23.1KB，压 6 轮仍在 23KB）。教训：动笔前列覆盖点清单+估每节字数；超预算时先删重复表述/合并表格列/EN 示例精简，不牺牲来源标注与【推断】诚实声明。**压不动时用 Python 按 `## ` 分节核算字节、先砍最大节**（实测 26KB→18.5KB 的关键方法）；**禁止用正则"清理"表格行尾空格——会毁 `|` 格式且让后续精确替换静默失效**（替换函数必须打印"未命中"提示）。完整合成工作流见 `references/kb-synthesis-workflow.md`。
+
 ### 方向反转时示例必须同步（语言/默认值翻转陷阱）
 
 改 skill 的输出语言/默认方向（如 H3 提示词英文→中文）时，**只改规则语句不够——references/ 里的示例正文是 agent 模仿的主要来源，示例不翻=残留**。反面案例（2026-08-07 h3-prompt-writing 英文→中文反转）：规则行全改完，自检才发现 base-en.txt 4 个完整示例 + ref-en.txt 六段示例正文全是英文——示例的模仿惯性比规则更强，agent 加载 skill 后照示例输出英文。
@@ -345,6 +372,28 @@ Hermes 终端以管理员权限运行时，`net use` / `Get-PSDrive` 看不到�
 3. **翻译一致性**：模板指令（如 I2VA 对齐句）在正文定义处与各 Case 里的实例必须同一译法
 
 **整文件 write_file 改写陷阱**：翻译/改写大文件时用 write_file 全量重写，极易把原内容原样写回（本会话连续 4 次写回英文原样，直到改用逐块 patch 才真正翻译）。正确姿势：① 用多次小 patch 逐示例块替换（每次 diff 可见实际变化）；② 替换后 grep 旧语言残留验证；③ 对比字节数变化确认真的改了（15,980→15,246 字节才算数）。
+
+### Gateway 安全重启（避免 hermes CLI 触发 update 恢复，2026-08-08 实测）
+
+修改飞书源码补丁（feishu_comment.py / gateway/run.py / collab.py）后必须重启 gateway 才生效。**不要用 `hermes gateway status/start` CLI 重启**——记忆记载这些命令可能触发 update 恢复流程连带停 gateway（cryptography 损坏期间）。安全路径：
+
+```bash
+# 1. 找 gateway 进程（webhook 端口 8644）
+netstat -ano | grep 8644 | grep LISTENING   # 记下 PID（旧 55348 → 新 3596）
+
+# 2. 杀进程（MSYS 的 taskkill //PID 语法会报错，用 powershell）
+powershell -Command "Stop-Process -Id <PID> -Force; Start-Sleep 3; if (Get-NetTCPConnection -LocalPort 8644 -ErrorAction SilentlyContinue) { '8644 仍占用' } else { '8644 已释放' }"
+
+# 3. 计划任务拉起（任务名 Hermes_Gateway）
+powershell -Command "Start-ScheduledTask -TaskName 'Hermes_Gateway'; Start-Sleep 10; Get-NetTCPConnection -LocalPort 8644 -ErrorAction SilentlyContinue | Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table"
+
+# 4. 确认新进程加载了新代码
+powershell -Command "(Get-Process -Id <新PID>).StartTime"   # 应为刚才的时间
+grep -n "DISABLED 2026-08-08\|<你的改动标记>" plugins/platforms/feishu/feishu_comment_collab.py  # 改动在位
+tail -5 ~/AppData/Local/hermes/logs/gateway.log              # 无报错
+```
+
+功能级验证钩子改动：直接 import 模块调用函数（`venv/Scripts/python.exe -c` 里 import collab 后调 `record_project_memory`，确认返回 False 且不写文件），比只看日志更硬。**实测验证法**（2026-08-08）：用 `tempfile.TemporaryDirectory()` 打补丁 `collab.PROJECT_MEMO_DIR` 指向临时目录后调用，断言返回 False 且临时目录零文件——不依赖真实 vault 状态，可重复。
 
 ### 并行会话同写 skill/memory 文件（2026-08-07 实测）
 
@@ -362,6 +411,11 @@ Hermes 终端以管理员权限运行时，`net use` / `Get-PSDrive` 看不到�
    - `git push origin tmp-push-<名>:master`（fast-forward，远端无分叉才推得动）
    - `git checkout master` → `git branch -D tmp-push-<名>` → `git stash pop` 还原并行会话改动
    - 验证：`git fetch origin && git show origin/master:<路径>` 确认远端到位（CRLF 差异属正常，diff 只看内容）
+   - **⚠️ 推前先查远端是否已吸收你的内容（2026-08-08 实测，省掉整轮 cherry-pick 冲突）**：本地独有提交可能已被并行会话的后续大版本吸收（实测：本地知识库 v1.13.1 的 3 条招式，远端 v1.18.0 已 grep 命中全部 3 条——并行会话升级时把我的内容带进去了）。三步预检，任何一步说明"已吸收"就**不要推**：
+     1. `git branch -r --contains <commit>` — 有输出 = 该提交已在远端，不推
+     2. `git show origin/master:<文件> | grep -c "<你的关键内容>"` — 命中 = 内容已入库（版本号不同没关系，查内容不查版本）
+     3. `git ls-files --error-unmatch <文件>` — untracked = 该文件根本不走这个正本仓库（本机实测：妖玉影视/ 系列 skill 文件全是 untracked，本地 commit 只留本地，无需推）
+     全部确认需推才走临时分支流程——本次跳过预检直接 cherry-pick，撞 5 文件冲突（AA 状态），abort 后才发现远端已吸收，纯浪费时间
 6. **并行会话共同编辑同一飞书文档 → block_insert_after 锚点必须先 XML 验证（2026-08-07 实测翻车）**：多会话同时改飞书正本（NSZK）时，`block_insert_after` 用的锚点 block id 可能已不是你以为的位置——实测：想插到第五部分"人物设计"后，误用了第三部分人物小传里的 li 作锚点（block id 复用/结构漂移），新章节被插进陆青山小传内部（外形 li 和性格 li 之间），把人物小传劈成两半。修复=删 52+1 个错位 block（`block_delete --block-id 逗号分隔` 批量）+ 恢复小传连续性。**规避**：①插入前用 `docs +fetch --scope full --detail with-ids --doc-format xml` 拉最新 XML，**打印锚点 block 的完整上下文确认它在目标章节内**（只看 id 不看内容=踩坑）；②插入后立即 `docs +fetch --scope full` 检查章节顺序（h2 出现次序），不只查关键词在位；③同文档并行编辑时，若发现文档字符数/结构异常变化（如 9,979→18,199 字符），先确认并行会话是否已加了同类内容——**内容重叠时保留更完整的一版，删自己插错的一版**（本次：并行 v2.1.4 参考片单比我 v2.1.3 简版完整，删简版留详版）
 
 ### 并行 terminal 调用共享 shell 状态
@@ -388,7 +442,7 @@ text = text.replace(old, new)
 p.write_text(text)
 ```
 
-`hermes config set` 不可靠——声称保存成功但可能写到错误路径（`~/.hermes/` 而非 `%LOCALAPPDATA%/hermes/`），且不会报错。
+`hermes config set` 实测可靠（2026-08-08 反例修正）：`hermes config set web.backend ddgs` 正确写入 `%LOCALAPPDATA%/hermes/config.yaml` 并回显「✓ Set ... in C:\Users\...\config.yaml」——patch 工具被 config 保护拦截时优先走 `hermes config set`，**以回显路径确认写入位置**（若回显路径是 `~/.hermes/` 再退回 execute_code 直接改文件）。
 
 ### 社区桌面插件安装
 
@@ -477,6 +531,10 @@ p.write_text(text)
 | `references/lark-cli-doc-edit-pitfalls.md` | **lark-cli 文档编辑陷阱** — str_replace 跨 block 静默失败 + block 操作正确姿势（2026-08-06 实测） |
 | `references/memory-providers.md` | 外部记忆提供者 8 个对比（Honcho/Mem0/Holographic/OpenViking…）— 本地 vs 云 + 隐私选择建议 + **Hindsight 本地嵌入式二次安装定稿**（curses 向导坑/手动配置三件套，2026-08-06） |
 | `references/hindsight-ops-diagnostics.md` | **Hindsight 运维诊断** — recall 搜不到≠没 retain（consolidation 积压是真因，recall_types=observation 只召回已提炼事实）；路径/端口/日志速查；**数据层验证 API**（stats/memories/list/recall+limit，2026-08-08）；飞书→Hindsight 天生打通；**验证定稿**：飞书项目记忆可靠 Hindsight，Obsidian 项目记忆层可降级为 git 归档，画像/路由/名单仍留 Obsidian |
-| `references/feishu-collab-health-check.md` | **飞书协作健康度巡检** — 五面检查（画像库/路由表/项目记忆/cron/双通道活跃度）+ 常见发现判据 + **修复层指引**（路由 chat_id 反查、多项目成员豁免keys、话题key双后缀、健康脚本用法、摘要补评论通道）（2026-08-07 实测） |
+| `references/feishu-collab-health-check.md` | **飞书协作健康度巡检** — 五面检查（画像库/路由表/评论线程/双通道活跃度 + 项目记忆已迁移 Hindsight 2026-08-08 不再检查）+ 常见发现判据 + **修复层指引**（路由 chat_id 反查、多项目成员豁免keys、话题key双后缀、健康脚本用法、摘要补评论通道）+ **评论会话 TTL→归档机制**（2026-08-08 修复：超时不再删文件，移入 `评论会话/archive/` 保留原文证据——画像勘误反查有据；IM 会话 state.db 内核永久留档 vs 评论会话手动实现的差异） |
+| `references/profile-maturity-framework.md` | **画像/数据链路成熟度评估框架** — 五标准（使用/演进/数据驱动/易更新/稳定灵活平衡，NN/g 2023 取证）+ 本机画像对照（反馈闭环 3b/3c/3d 补齐后 6 项达标）+ **框架复用两轮**：创作知识库使用率（knowledge-usage.py 数据源坑）+ 归档一致性检查（archive-consistency.py 四项校验） |
 | `scripts/hindsight-e2e-check.py` | **Hindsight 记忆 provider 端到端验证脚本** — retain→consolidation→recall 闭环探测（方法名/异步时序/venv 用法全内置） |
+| `scripts/knowledge-usage.py` | **知识库使用率统计脚本** — 从 state.db 统计 skill_view 实际加载了哪些知识库文件（主本/文件/僵尸资产三块输出；数据源坑：过滤用知识库名不用 'skill_view'，file 字段非 file_path）。挂接知识库每日巡检 cron 步骤6（2026-08-08） |
+| `scripts/archive-consistency.py` | **归档一致性检查脚本** — 四项校验：MEMORY/USER 镜像 vs 真源 diff、剧本库 MOC 计数 vs 磁盘、看板日报新鲜度（>3天）、成员名单↔画像 open_id 对应。挂接知识库每日巡检 cron 步骤7（2026-08-08）。设计：检查为主不自动改 MOC（计数不符需人判断） |
+| `references/kb-synthesis-workflow.md` | **从存量知识库合成新文档工作流** — 模板先行/grep 关键词簇提取（不全文读）/逐条引用/【推断】诚实声明/中文体积预算/多轮 patch 后复读（2026-08-08《声音设计密码》实例：13 份素材 434KB→23KB 成文） |
 | `scripts/cleanup-projects.py` | 项目清理脚本 |
