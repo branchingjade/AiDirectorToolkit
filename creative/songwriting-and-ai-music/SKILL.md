@@ -1,6 +1,7 @@
 ---
 name: songwriting-and-ai-music
 description: "Songwriting craft and Suno AI music prompts."
+version: 2.0.0
 tags: [songwriting, music, suno, parody, lyrics, creative]
 platforms: [linux, macos, windows]
 triggers:
@@ -227,29 +228,34 @@ STRUCTURE:
   [Instrumental] [Instrumental Break] [Guitar Solo]
   [Breakdown] [Build-up] [Outro] [Silence] [End]
 
-VOCAL PERFORMANCE:
-  [Whispered] [Spoken Word] [Belted] [Falsetto] [Powerful]
-  [Soulful] [Raspy] [Breathy] [Smooth] [Gritty]
-  [Staccato] [Legato] [Vibrato] [Melismatic]
-  [Harmonies] [Choir] [Harmonized Chorus]
+VOCAL PERFORMANCE CUES (embed inside section tags, never standalone):
+  Whispered, Spoken Word, Belted, Falsetto, Powerful,
+  Soulful, Raspy, Breathy, Smooth, Gritty,
+  Staccato, Legato, Vibrato, Melismatic,
+  Harmonies, Choir, Harmonized Chorus
+  → e.g. `[Verse 2 - Rap Verse]` `[Chorus - Powerful, Harmonized Chorus]`
 
-DYNAMICS:
-  [High Energy] [Low Energy] [Building Energy] [Explosive]
-  [Emotional Climax] [Gradual swell] [Orchestral swell]
-  [Quiet arrangement] [Falling tension] [Slow Down]
+DYNAMICS (embed inside section tags):
+  High Energy, Low Energy, Building Energy, Explosive,
+  Emotional Climax, Gradual Swell, Orchestral Swell,
+  Quiet Arrangement, Falling Tension, Slow Down
+  → e.g. `[Pre-Chorus - Building Energy]` `[Final Chorus - Explosive]`
 
-GENDER:
-  [Female Vocals] [Male Vocals]
+GENDER (embed inside section tags):
+  Female Vocals, Male Vocals
+  → e.g. `[Chorus - Female Vocals]`
 
-ATMOSPHERE:
-  [Melancholic] [Euphoric] [Nostalgic] [Aggressive]
-  [Dreamy] [Intimate] [Dark Atmosphere]
+ATMOSPHERE (embed inside section tags):
+  Melancholic, Euphoric, Nostalgic, Aggressive,
+  Dreamy, Intimate, Dark Atmosphere
+  → e.g. `[Verse 1 - Intimate]` `[Bridge - Dark Atmosphere]`
 
-SFX:
-  [Vinyl Crackle] [Rain] [Applause] [Static] [Thunder]
+SFX (embed inside section tags):
+  Vinyl Crackle, Rain, Applause, Static, Thunder
+  → e.g. `[Intro - Rain]` `[Outro - Vinyl Crackle]`
 
 Put tags in BOTH style field AND lyrics for reinforcement.
-Keep to 5-8 tags per section max — too many confuses the AI.
+Keep tags sparse — 1-2 cues per section, 4-8 enriched cues per full song.
 Don't contradict yourself ([Calm] + [Aggressive] in same section).
 
 TAG EMBEDDING HARD RULE: every bracketed tag in the lyrics field must
@@ -265,13 +271,13 @@ RESTRAINT: most full songs = standard section labels + 4-8 enriched cues;
 SIMPLIFY them — don't add more.
 
 MOVEMENT/ENERGY TAG FAMILIES (embed inside section tags):
-- Energy: [Slow Build] [Rising Tension] [Release] [Final Surge] [Afterglow]
-- Pulse: [Free Time] [Rubato Entrance] [Pulse Emerges] [Locked Groove]
-  [Half-Time Shift] [Double-Time Lift]
-- Texture: [Drone Bed] [Sparse Percussion] [Full Rhythm Section]
-  [Layered Harmonies] [Ostinato Bed] [Noise Wash]
-- Vocal: [Spoken Intro] [Chanted Hook] [Melismatic Lift] [Group Response]
-  [Harmony Stack]
+- Energy: Slow Build, Rising Tension, Release, Final Surge, Afterglow
+- Pulse: Free Time, Rubato Entrance, Pulse Emerges, Locked Groove,
+  Half-Time Shift, Double-Time Lift
+- Texture: Drone Bed, Sparse Percussion, Full Rhythm Section,
+  Layered Harmonies, Ostinato Bed, Noise Wash
+- Vocal: Spoken Intro, Chanted Hook, Melismatic Lift, Group Response,
+  Harmony Stack
 
 STRUCTURE TEMPLATES:
 - Pop: `[Verse 1] [Pre-Chorus] [Chorus] [Verse 2] [Pre-Chorus] [Chorus] [Bridge] [Final Chorus] [Outro]`
