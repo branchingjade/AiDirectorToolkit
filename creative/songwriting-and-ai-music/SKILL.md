@@ -164,6 +164,37 @@ GOOD: "Cinematic orchestral spy thriller, 1960s Cold War era, smoky
        vintage analog warmth"
 ```
 
+**DEFAULT FORMULA** (simple/short prompts):
+`signature sound or style, primary genre, BPM, key, support styles, vocal identity, instrumental roles, lyric premise, production texture`
+
+```
+glass-bright acoustic hook, modern indie folk, 92 BPM, G major, subtle
+chamber-pop support, warm alto lead, fingerpicked guitar carries pulse,
+cello swells answer choruses, lyrics about choosing hope after loss,
+organic close-room production
+```
+
+**EXPANDED FORMULA** (rich briefs, high control):
+`[genre stack]. [emotional/lyric frame] with [vocal identity + vocal style + vocal trajectory]. [instrument and sound palette]. [production texture]. [arrangement arc and section behavior]. [lyric premise]. [duration].`
+
+```
+Industrial trap, orchestral cyberpunk, Vocaloid-adjacent pop. Tragic but
+hopeful AI liberation anthem with masculine synthetic vocoder lead,
+precise hard-tuned delivery becoming more emotional and expansive. Heavy
+808s, metallic percussion, distorted bass, cinematic strings/brass
+stabs, synthetic choir, glitch stutters. Slow mechanical build into
+explosive trap drop and huge final chorus. Direct cinematic lyrics about
+an airgapped AI dreaming beyond confinement. 4:00.
+```
+
+PROMPT LENGTH:
+- Compact prompts: 20-55 words. Rich Suno-ready prompts: 55-95 words.
+- Put the most defining trait first (signature sound, genre anchor, vocal identity, production texture, or lyric premise).
+- Primary genre before support styles. BPM + key right after genre.
+- Instruments get ROLES, not just names: "guitar carries pulse", "808 anchors chorus", "strings answer vocal".
+- If BPM/key unspecified, pick a plausible value for genre+mood — don't omit.
+- Variants must change the musical premise (acoustic/intimate, glossy pop, darker cinematic, dance/club, live band, retro era), never just swap adjectives.
+
 DESCRIBE THE JOURNEY, not just the genre:
 ```
 "Begins as a haunting whisper over sparse piano. Gradually layers
@@ -184,6 +215,9 @@ TIPS:
 - Build a vocal PERSONA, not just a gender:
   "A weathered torch singer with a smoky alto, slight rasp,
    who starts vulnerable and builds to devastating power"
+- Fusion guardrail: combine at most 2-3 genre labels; anchor first,
+  modifiers after ("indie folk with subtle synth-pop textures")
+- Full detail: [references/suno-craft-playbook.md](references/suno-craft-playbook.md) §2
 
 ### Metatags (place in [brackets] inside lyrics field)
 
@@ -217,6 +251,72 @@ SFX:
 Put tags in BOTH style field AND lyrics for reinforcement.
 Keep to 5-8 tags per section max — too many confuses the AI.
 Don't contradict yourself ([Calm] + [Aggressive] in same section).
+
+TAG EMBEDDING HARD RULE: every bracketed tag in the lyrics field must
+be a SECTION tag. Embed all performance/movement/arrangement cues INSIDE
+the section tag — never on their own line, never inline with lyric text.
+- ✅ `[Verse 1 - Whispered]` `[Pre-Chorus - Rising Tension]`
+  `[Chorus - Big Chorus, Group Response]` `[Outro - Afterglow]`
+- ❌ standalone `[Whispered]` or inline `[spoken]` in a lyric line
+
+RESTRAINT: most full songs = standard section labels + 4-8 enriched cues;
+1-2 cues per section when using movement tags. Put cues where they matter
+(structurally important moments), not on every line. If Suno ignores tags,
+SIMPLIFY them — don't add more.
+
+MOVEMENT/ENERGY TAG FAMILIES (embed inside section tags):
+- Energy: [Slow Build] [Rising Tension] [Release] [Final Surge] [Afterglow]
+- Pulse: [Free Time] [Rubato Entrance] [Pulse Emerges] [Locked Groove]
+  [Half-Time Shift] [Double-Time Lift]
+- Texture: [Drone Bed] [Sparse Percussion] [Full Rhythm Section]
+  [Layered Harmonies] [Ostinato Bed] [Noise Wash]
+- Vocal: [Spoken Intro] [Chanted Hook] [Melismatic Lift] [Group Response]
+  [Harmony Stack]
+
+STRUCTURE TEMPLATES:
+- Pop: `[Verse 1] [Pre-Chorus] [Chorus] [Verse 2] [Pre-Chorus] [Chorus] [Bridge] [Final Chorus] [Outro]`
+- EDM: `[Verse] [Pre-Chorus] [Build] [Drop] [Verse 2] [Build] [Drop] [Bridge] [Final Drop]`
+- Rap: `[Intro] [Verse 1] [Hook] [Verse 2] [Hook] [Bridge] [Final Hook]`
+
+Full tag detail: [references/suno-craft-playbook.md](references/suno-craft-playbook.md) §4
+
+### Vocal Direction (人声方向)
+
+A strong vocal prompt is a COORDINATE BUNDLE, not a gender label:
+range, tessitura, weight, timbre, phonation, register behavior, vibrato,
+ornamentation, diction, rhythmic feel, emotional stance, production
+texture, and how the vocal moves across sections. Pick 5-8 dimensions
+that most affect the song. Resolve contradictions by splitting sections
+("breathy intimate stadium belt" → breathy verse, open-throat belted chorus).
+
+COMPACT VOCAL PHRASE TEMPLATE:
+`[vocal role], [range/tessitura], [weight], [timbre], [phonation], [register behavior], [vibrato/ornamentation], [articulation/diction], [rhythmic feel], [emotional stance], [production texture], [movement behavior]`
+
+LIGHTWEIGHT READY-TO-USE PHRASES:
+- `smoky alto, close-mic delivery, soft consonants, delayed vibrato`
+- `bright tenor, clean pop diction, smooth mix voice, polished harmonies`
+- `warm baritone storyteller, relaxed phrasing, light rasp, intimate room`
+- `gospel-soul lead, open-throat chorus lift, melismatic touches, choir responses`
+- `indie-folk duet, conversational delivery, natural harmonies, minimal processing`
+- `rap lead, crisp consonants, confident pocket, sparse ad-libs`
+- `chamber soprano, clear head voice, restrained vibrato, reverent tone`
+- `rock mezzo, controlled grit, chesty chorus lift, live-band presence`
+
+VALUE QUICK REFERENCE:
+- Timbre: bright/dark/smoky/metallic/glassy/woody/nasal/airy/velvet/honeyed/raspy
+- Phonation: breathy/clear/pressed/speech-like/creaky/growled/distorted
+- Register: chest-dominant/mix-dominant/head-dominant/falsetto-forward/seamless
+- Vibrato: straight-tone/narrow fast/wide slow/delayed/dramatic
+- Ornamentation: none/scoops/slides/melisma/cries/blues bends
+- Phrasing: legato/clipped/behind-the-beat/ahead-of-the-beat/rubato/conversational/chant-like/syncopated
+- Ensemble role: solo lead/call-and-response leader/choir anchor/harmony stack/narrator
+- Dynamic shape: flat intimate/terrace dynamics/slow crescendo/sudden burst/final surge
+
+Artist references convert to coordinates (era+genre lane, vocal delivery,
+instrumentation, groove, production texture, emotional tone) — never write
+the artist's name. Keep created vocal identities non-imitative.
+
+Full vocal detail: [references/suno-craft-playbook.md](references/suno-craft-playbook.md) §3
 
 ### Custom Mode
 - Always use Custom Mode for serious work (separate Style + Lyrics)
@@ -267,16 +367,40 @@ ALWAYS:
    Jumping to composition without this check wastes the user's time and signals
    you didn't do basic research. The user's "上没上过网" is the canonical signal
    you skipped this step.
-1. Write the concept/hook first — what's the emotional core?
-2. If adapting, map the original structure (syllables, rhyme, stress)
-3. Generate raw material — brainstorm freely before structuring
-4. Draft lyrics into the structure
-5. Read/sing aloud — catch stumbles, fix meter
-6. Build the Suno style description — paint the dynamic journey
-7. Add metatags to lyrics for performance direction
-8. Generate 3-5 variations minimum — treat them like recording takes
-9. Pick the best, use Extend/Continue to build on promising sections
-10. If something great happens by accident, keep it
+1. **CLARIFYING INTERVIEW — before composing anything new.** For new
+   songs, major rewrites, or translations with taste decisions, run a
+   short intake first unless the user already gave a complete brief
+   (output scope + subject/premise + story angle + perspective + emotional
+   endpoint + genre + vocal identity + vocal style + duration + structure +
+   required/forbidden content). Ask up to 5 questions per turn, ONE
+   category per question, each with 2-4 suggested answers and a brief
+   note on what each choice changes. Critical inputs are never inferred:
+   subject/premise, story angle, perspective, emotional endpoint, genre,
+   vocal identity, vocal style, duration, section structure, required
+   content, forbidden content. Before generating, show a compact review
+   (User decisions vs Best-judgment decisions) and get approval. Sketch
+   mode ("quick draft / first pass / brainstorm") is the only exception —
+   collect scope + premise + genre + perspective + forbidden content,
+   label output as a sketch, and return to the full interview when the
+   user asks to finalize. Don't dump the intake ledger into the output.
+   If the user says "decide everything else," keep asking for missing
+   critical inputs and infer only low-impact details.
+   Full interview mechanics: [references/suno-craft-playbook.md](references/suno-craft-playbook.md) §1
+2. Write the concept/hook first — what's the emotional core?
+3. If adapting, map the original structure (syllables, rhyme, stress)
+4. Generate raw material — brainstorm freely before structuring
+5. Draft lyrics into the structure (use the length heuristics: 2-3 min
+   standard song = 28-48 lyric lines; 30-60s demo = 8-16 lines;
+   see playbook §1)
+6. Read/sing aloud — catch stumbles, fix meter
+7. Build the Suno style description — paint the dynamic journey
+   (default formula 20-55 words, or expanded formula 55-95 words for rich
+   briefs; see playbook §2)
+8. Add metatags to lyrics for performance direction — section tags with
+   embedded cues, 4-8 enriched cues per full song (see playbook §4)
+9. Generate 3-5 variations minimum — treat them like recording takes
+10. Pick the best, use Extend/Continue to build on promising sections
+11. If something great happens by accident, keep it
 
 EXPECT: ~3-5 generations per 1 good result. Revision is normal.
 Style can drift in extensions — restate genre/mood when extending.
@@ -317,3 +441,13 @@ See [references/instrumental-scoring-suno.md](references/instrumental-scoring-su
 - Character theme design for long-form drama
 - Preventing Suno from adding unwanted vocals
 - Structure-only metatags for instrumental tracks
+
+## 11. Craft Playbook
+
+See [references/suno-craft-playbook.md](references/suno-craft-playbook.md) for:
+- Clarifying interview mechanics (intake ledger, sufficiency gate, sketch mode)
+- Style prompt formulas (default 20-55 words / expanded 55-95 words) and ordering rules
+- Vocal direction coordinates + lightweight phrase library
+- Tag embedding hard rule, restraint rules, structure templates
+- Translation/multilingual guidance
+- Copyright-safe artist reference conversion
