@@ -1,7 +1,7 @@
 ---
 name: songwriting-and-ai-music
 description: "Songwriting craft and Suno AI music prompts."
-version: 2.0.0
+version: 2.1.0
 tags: [songwriting, music, suno, parody, lyrics, creative]
 platforms: [linux, macos, windows]
 triggers:
@@ -410,6 +410,26 @@ ALWAYS:
 
 EXPECT: ~3-5 generations per 1 good result. Revision is normal.
 Style can drift in extensions — restate genre/mood when extending.
+
+### 理解门槛（2026-08-14 魔王主题曲事件，根源不是规则是理解）
+
+套模板是默认行为——范例一到手，模型会激活相似模式直接填充，换词不换骨。
+理解是主动行为：拆开它为什么好（结构/意象/情绪怎么协作）、规律是什么、
+怎么接到这个任务的内核，再动笔。产出必须是从规律长出来的新东西，
+不是换了词的模板。
+
+写不出来，或第一稿被否，先过这道门——门里是问题，不是禁令：
+
+1. 我是在套模板，还是从理解出发？
+2. 我对这个风格/题材的规律，掌握到什么程度？
+3. 缺理解就去补：拆 3 首同风格作品、查知识库、派研习——补完再写。
+   被否一次就补一次，不是换词重发。
+4. 只有当 1-3 都做完还不行，才问人——而且只问「方向对不对」，
+   不问「你教我怎么写」。
+
+材料（剧本/链接/文档）一律自查：会话历史 → 飞书云盘 → Vault →
+全查过才问人，问的时候说明查了哪些地方。「会话重置了翻不到」不成立
+——记录永远在，只有没查对。
 
 ---
 
