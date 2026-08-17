@@ -276,6 +276,8 @@ The registry of record is `hermes_cli/commands.py` — every consumer
 /yolo                Toggle approval bypass
 /busy [sub]          Control what Enter does while Hermes is working (CLI)
                      (subcommands: queue, steer, interrupt, status)
+
+**Gateway busy input（agent 忙时用户发新消息的处理逻辑）**：`display.busy_input_mode` 配置，三态——`interrupt`（默认，打断当前任务立即响应）/ `queue`（FIFO 排队，跑完再处理）/ `steer`（注入当前运行，下个工具调用后到达，空消息/带附件/被拒回退 queue）。`hermes config set display.busy_input_mode steer` 改后 **gateway 重启生效**（`_busy_input_mode` 启动时读取，gateway/run.py:8553）；桌面/CLI 会话不受影响。首次触发有 onboarding 提示（`onboarding.seen.busy_input_prompt`）。⚠️ 飞书**文档评论 agent**（feishu_comment.py）不走此机制——per-session asyncio.Lock 天然排队，无 interrupt/steer。
 /indicator [style]   Pick the TUI busy-indicator style (CLI)
                      (styles: kaomoji, emoji, unicode, ascii)
 /footer [on|off]     Toggle gateway runtime-metadata footer on final replies

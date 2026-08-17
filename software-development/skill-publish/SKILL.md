@@ -25,16 +25,16 @@ metadata:
 ### 1. 同步正本
 
 ```bash
-# 妖玉影视三件套正本仓库
-cd /c/Users/HMSJ/Documents/ClaudeCode/AiDirectorToolkit
-# 本地 skill 目录 → 仓库对应路径（注意：仓库用 妖玉影视/ 子目录结构）
-/bin/cp "C:/Users/HMSJ/AppData/Local/hermes/skills/妖玉影视/<SKILL名>/SKILL.md" "妖玉影视/<SKILL名>/SKILL.md"
-git add -A && git commit -m "feat(<名>): vX.Y.Z <改动摘要>"
+# 妖玉影视三件套正本仓库 = Hermes 主工作区 skills 目录（2026-08-17 起，ClaudeCode 副本已删除）
+cd /c/Users/HMSJ/AppData/Local/hermes/skills
+# 本地 skill 目录 → 同目录提交（skill 就在正本仓库内，直接 git add）
+git add "妖玉影视/<SKILL名>/" && git commit -m "feat(<名>): vX.Y.Z <改动摘要>"
 ```
 
 **注意**：
 - 仓库结构是 `妖玉影视/<skill名>/`，不是根目录——先 `find . -name "SKILL.md"` 确认
 - 远程可能有结构重构（如"归入妖玉影视分类目录"），pull 前先看远程结构，push 被拒先 `git pull --rebase`
+- **历史教训（2026-08-17）**：曾存在 `Documents/ClaudeCode/AiDirectorToolkit` 副本（AI-Skills 身份）与主工作区双写同一 GitHub 远程，导致两线分叉 60+ 提交。副本已删，**一律以主工作区 skills 目录为唯一正本**，不要再建第二个仓库副本
 - 中文路径用 `/bin/cp` 或 python，别用 `cp`（MSYS `cp -i` 别名静默失败）
 
 ### 2. 打 tag

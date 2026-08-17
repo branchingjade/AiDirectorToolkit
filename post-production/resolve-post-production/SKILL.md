@@ -113,6 +113,73 @@ HTML 模板和生成脚本在 `references/color-report-template.html`。8bit h26
 
 ## 常见问题
 
+### FCPXML 导入兼容性（剪映/外部工程 → 达芬奇，2026-08 实测达芬奇 21 Studio）
+
+达芬奇 **File → Import → Timeline** 或脚本 `MediaPool.ImportTimelineFromFile()` 导入 FCPXML 时，以下陷阱全部实测踩过：
+
+| 陷阱 | 症状 | 解法 |
+|---|---|---|
+| format 缺 `name` 属性 | 导入失败（返回 None） | format 必须带 `name="FFVideoFormat{W}x{H}p{fps}"` |
+| 素材混帧率/分辨率却共用一个 format | **达芬奇崩溃**（segfault） | 每素材用 ffprobe 探测真实帧率/分辨率，独立 format |
+| `<sync>/<lane>` 结构 | 导入失败 | 全部 clip 直接放 spine，不用 sync（达芬奇 21 实测拒绝）；**多轨用 clip 级 `lane` 属性**（主轨无 lane/叠加轨 lane="1""2"…） | 
+| duration 写浮点秒 `4.000000s` | **每片段只有 1 帧**（用户目视检查抓出） | duration 必须有理数帧数 `帧数/25s`（asset 同理），**禁止浮点秒** |
+| offset 秒取整 `offset="4/1s"` | 时间线出现**空隙/空白**（剪映 start 多非整数秒，round 误差 ±0.37s） | offset 帧精度 `offset="{int(round(secs*50))}/50s"`；start（源入点）同理 |
+| **剪映工程 fps=50（子帧 20ms）** | 若直接 round 到 25fps 帧（`round(secs*25)`），相邻片段出现**多处 1 帧间隙**（25fps 无法表示剪映半帧位置 134.5/135.5 → 取整出缝） | **时间线仍用 25fps**（`frameDuration="1/25s"`），但主轨做**缝合并**：每段 `offset_f=round(secs*25)`、`dur_f=round(dur*25)`，若 `off_f > prev_end`（缝）或 `< prev_end`（叠）都吸附到 `prev_end`，`prev_end = off_f + dur_f` 接力 → 间隙 0 处。代价：片段位置最大偏移 4 帧（160ms，平均 1.2 帧，肉眼不可见）。**不要升 50fps 时间线**——实测 50fps 下 lane>0 clip 的 offset 解析错位（V2 叠加轨跑到 2 倍位置，如 75.6s→151.3s） | 
+| 变速 rate 缺 timebase `<rate><value>0.9</value></rate>` | **片段不套底**（1/36），变速段无法调色 | `<rate><value>0.9</value><timebase>25</timebase></rate>`（timebase 必须与时间线 fps 一致=25；变速+套底两全，36/36） |
+| asset duration < clip 用时长 | 导入失败 | asset duration 向上取整（int+1），必须 ≥ clip 时长 |
+| 同名时间线已存在 | 返回 None 且**不报错** | 导入前 `DeleteTimelines` 删旧；测试残留时间线会阻断套底 |
+| **同名素材**（同一文件名多个 material_id，剪映常见） | 达芬奇对同名 asset 去重改名 `name[xxx].ext` → 路径失配 → **脱机** | 转换器按 `(name, kind)` 去重 asset：同名只输出一个 asset，所有 clip 复用同一 aid（改名去重后 26 组同名 → 0 脱机） |
+| **png/jpeg 静帧**（定格图素材） | 达芬奇导入时自动加 `[帧范围]` 后缀（如 `sdr[709-270733].png`）→ 文件不存在 → **脱机** | `fix_offline.py` 扫描媒体池 File Path，脱机文件在 NAS 同目录按基名匹配建副本（53/53 修复） |
+| 音频 `<gap>` 包裹 | 音频轨全丢（A1=0） | gap 音频是达芬奇导入器硬限制；**正确格式 = `<asset-clip>` + `audioRole="dialogue"` 直接放 spine**（无 gap/lane，第1集 4 轨实测全进） |\n| **旧式 PCM wav 头**（fmt_size=16/audio_format=1，剪映旧音频） | 媒体池池项标"离线 -"、片段 GetMediaPoolItem()=None | **首选：用户 GUI「文件 → 从媒体夹重新套底」手动链接（一次全链上，2026-08-11 用户亲自验证；API 无对应方法——RelinkClips 只重定位池项路径、ReplaceClip/解锁四步均无法让片段链上池项，多次实测失败，勿再尝试 API 复刻）**。备用批量修复：`fix_wav_headers.py` 重编码为 EXTENSIBLE（fmt=40/audio_format=65534），**ffmpeg 必须加 `-write_bext 1`**（默认 `-c:a pcm_s24le` 输出仍是 fmt=16 假修复）；转换器素材引用保持原素材不绕路 |\n| 音频多 clip 共享同一 asset（同名素材切多段） | 音频片段不关联（池项=False） | **保持同名合并（达芬奇只按文件建池项）**，脱机音频交给用户 GUI「从媒体夹重新套底」手动处理——拆独立 asset 反而导致片段无池项可链（本会话走过弯路：拆名+解锁四步均失败，用户 GUI 一次成功） |
+| spine 内 title 数量 ≥30 | 导入失败（≤25 通过） | 字幕默认走 SRT 拖入（达芬奇自动生成字幕轨），不进 FCPXML |
+| `file:///C%3A/...`（冒号被 quote 编码） | "导入成功"但素材不落轨、媒体池空、时间线 0 片段 | URI 里冒号/斜杠必须保留：`urllib.parse.quote(p, safe='/:')` |
+| `hasVideo="true"`/`hasAudio="true"` | **导入"成功"但素材全部不落轨**（V1=0，媒体池空，最隐蔽） | 布尔必须写 `1`/`0`：`hasVideo="1" hasAudio="0"`——达芬奇只认数字布尔，true/false 静默丢弃素材 |
+| spine 内同 offset 重叠 clip（视频+音频都从 0 开始） | 导入失败 | 音频轨 clip 整体排视频之后（分组+组内按 offset 排序） |
+| project 名与已有时间线重名 | 导入失败/返回旧时间线 | `--name` 指定唯一时间线名 |
+
+**关键验证原则**：`ImportTimelineFromFile` 返回非 None **不等于导入成功**——必须检查 `tl.GetItemListInTrack('video', 1)` 片段数 > 0 且媒体池有素材。返回成功但 0 片段 = 素材路径/格式问题。
+
+**FCPXML 结构要点**：spine 内元素必须时间有序；asset 的 `format` 引用各自真实格式；`hasVideo`/`hasAudio` **必须写 `1`/`0`**（实测 `"true"`/`"false"` 会导致素材全部不落轨 V1=0；**视频素材用 `hasAudio="0"` 即丢弃自带音频、只留剪映音频轨**）；时间单位用有理数帧 `"N/25s"`（25fps 时间线）；**时间线保持 25fps + 主轨缝合并**（剪映草稿顶层 `fps: 50` 子帧精度会出 1 帧间隙，但升 50fps 时间线会导致 lane>0 clip offset 错位——详见上表，勿再走 50fps 路线）；**音频 clip 用 25fps 帧格式 + audioRole 直接放 spine**（详见 references「音频」节）。
+
+### 套底（relink）机制：ImportTimelineFromFile 只在素材"不存在"时创建+链接
+
+**核心事实**：达芬奇导入 FCPXML 时间线时，素材已存在于媒体池 → **不建立关联**（时间线片段 `GetMediaPoolItem()=None`，无法调色/回批）。这是"为什么素材都在但没套底"的根因。
+
+**可靠流程**（batch_import_manlv.py 全量 51 集验证）：
+1. 当前夹 = `01素材/<集>`（素材自动创建到此，目录结构正确）
+2. 先删同名旧时间线（残留时间线引用素材 → DeleteClips 删不净 → 阻断重建）
+3. 清空该夹旧素材——**必须循环 DeleteClips 直到 GetClipList 为空（0 项）**，一次删不干净（达芬奇索引残留）
+4. **删除操作后当前夹可能失效 → 必须重新 `SetCurrentFolder(ep_folder)`**（漏了这一步素材创建错位 → 片段不套底，1/52 的根因）
+5. `ImportTimelineFromFile` → 达芬奇创建素材 + 链接 = 套底
+6. **`MoveClips([时间线对象], 00时间线)`**——时间线对象创建在当前夹，**必须移走**，否则下次导入素材夹残留时间线对象 → 素材不重建 → 不套底（反复失败的根因链最后一环）
+
+**⚠️ 套底验证必须在导入同一进程内做**：`GetMediaPoolItem()` **跨进程（新脚本连接）返回 None = 假象**，不是真未套底。批量脚本在 `ImportTimelineFromFile` 后立即同进程查询并打印 `导入进程内套底: N/N`——跨进程验证脚本会误判全部未套底（本会话最大弯路：51 集反复重导其实一直成功，是验证方式错了）。
+
+**⚠️ 排查脱机时先确认媒体池里是原素材**（2026-08-11 用户纠正）：音频脱机排查时先造了重编码 `_ext.wav` 副本并让转换器映射过去，结果媒体池里**没有原素材**，用户 GUI 重新套底时无从选原文件（"你都没把原素材放进去"）。正确顺序：① 先确认导入的是原素材（转换器 media_root 映射不绕路）② **脱机音频终态方案 = 用户 GUI「文件 → 从媒体夹重新套底」手动链接（一次全链上，用户亲自验证；API 无对应方法，勿再尝试 RelinkClips/ReplaceClip/解锁四步复刻）** ③ 重编码（fix_wav_headers.py，注意 ffmpeg 需 `-write_bext 1`）只作备用批量修复，不改变转换器的素材引用。
+
+验证：`c.GetMediaPoolItem()` 非 None = 套底成功。
+
+详见 `references/jianying-draft-to-fcpxml.md`「套底（relink）机制」节。
+
+### 达芬奇 Studio 脚本 API：Windows 外部连接（Python 3.12）
+
+Studio 版但安装时未勾 Developer/Scripting 组件 → 无 `DaVinciResolveScript.py` 模块。解决：
+
+1. 从 GitHub 镜像拉官方模块（如 `diop/davinci-resolve-api` 的 `Modules/DaVinciResolveScript.py`）
+2. **Python 3.12 已移除 `imp` 模块**——官方模块会 ImportError，需打补丁改用 `importlib.util.spec_from_file_location`
+3. fusionscript.dll 用 ExtensionFileLoader 加载（直接 spec_from_loader 会报 NoneType）：
+   ```python
+   loader = importlib.machinery.ExtensionFileLoader('fusionscript', r'C:\Program Files\Blackmagic Design\DaVinci Resolve\fusionscript.dll')
+   spec = importlib.util.spec_from_loader('fusionscript', loader)
+   mod = importlib.util.module_from_spec(spec); loader.exec_module(mod)
+   sys.modules['fusionscript'] = mod
+   ```
+4. 需 `System.Scripting.Mode = 1`（Preferences → External scripting → Local，在 `%APPDATA%\Blackmagic Design\DaVinci Resolve\Preferences\config.dat` 可查）
+5. 达芬奇 21 实测 Python 3.12 可连（3.11 也试过可行）；bash 里默认 python 是 Hermes venv 的，用系统 Python 3.12 更稳
+6. 时间线管理 API：删除用 `MediaPool.DeleteTimelines([...])`（不是 project.DeleteTimeline，21 无此方法）；取片段用 `GetItemListInTrack('video', 1)`
+
+完整剪映草稿 → FCPXML 转换器在用户工作区 `C:\Users\HMSJ\Documents\Hermes\scripts\jianying2davinci.py`（git 仓库），草稿结构逆向细节见 `references/jianying-draft-to-fcpxml.md`。**复合片段（嵌套剪辑）渲染方案**（render_compounds.py + compound_map 映射 + 云缓存素材边界）同见该文件「已知边界」节。
+
 ### 性能排障：Resolve 卡顿/丢帧
 
 用户说"达芬奇很卡"或"修复达芬奇"→ **不要直接跳到 MCP**。"修复达芬奇"不等于 MCP 问题。先按以下顺序做系统级诊断：

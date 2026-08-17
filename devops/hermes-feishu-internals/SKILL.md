@@ -41,15 +41,21 @@ grep "Feishu-Comment" <logdir>/gateway.log | tail   # 事件有没有到、被�
 
 **⚠️ 改代码后必须重启 gateway**：规则文件是热的，但 `is_user_allowed` 等代码改动不是——重启前新规则文件可能被旧代码全部拒绝（比原来更严）。
 
+**⚠️ policy 静默回退 pairing（hermes update 抹补丁后遗症，2026-08-13 实测）**：规则文件写着 `members`、成员名单里有该用户，但日志却报 `denied (policy=pairing, rule=top)`——根因不是规则配置，是 **`hermes update` 把本地补丁代码覆盖了**：`feishu_comment_rules.py` 的 `_VALID_POLICIES` 不含 `members` 时，`load_config()` 把未知 policy 静默回退成 `pairing`（`if policy not in _VALID_POLICIES: policy = "pairing"`），所有未配对用户全被拒。诊断三步：①CLI `check docx:<token> <open_id>` 实测显示 ALLOWED 但 gateway 日志 denied = 进程内代码旧（同机同文件，CLI 用新代码、常驻进程用旧代码）；②对比 `feishu_comment_rules.py` mtime 与 gateway 启动时间——代码 mtime > 启动时间 = 运行中进程加载的是旧代码；③`git status` 查 UU 冲突文件（update 中断残留，`MERGE_HEAD` 可能已不在）。修复：`reapply-patches.py --apply` 重打（整体失败用 `git apply --3way` 手动解冲突）+ 恢复被删文件 + 重启 gateway，再 `check` 实测 ALLOWED 才算完。⚠️ 其他 agent 声称"已更新 skill"必须 grep 验证，self-report 不算数。
+
 ## 3. 评论 agent 特性（与聊天 agent 完全隔离）
 
 - 独立 AIAgent：`quiet_mode=True`、`skip_context_files=True`、工具集 `feishu_doc`/`feishu_drive`/`feishu_comment`
 - **`skip_memory` 按角色**：admin 加载全局记忆（用户明确要求），member 保持隔离防泄露——评论回复是公开的，团队成员都能看到
 - **会话 key**：`comment:{项目}:{用户}`（协作模式）/ `comment:doc:{类型}:{token}:{用户}`（未路由降级）——按人隔离，多用户不串台
-- 会话**磁盘持久化**（`Obsidian Vault/_hermes/评论会话/`，2026-08-07 起迁入 vault；此前 `~/AppData/Local/hermes/comment_sessions/`），重启不丢，TTL 1h，上限 50 条
+- 会话**磁盘持久化**（`Obsidian Vault/_hermes/评论会话/`，2026-08-07 起迁入 vault；此前 `~/AppData/Local/hermes/comment_sessions/`），重启不丢，TTL 1h，上限 50 条；TTL 后归档到同目录 `archive/`（不删，原始对话保留）
+- **评论会话不进 state.db、客户端侧边栏不可见**（2026-08-10 实测）：评论 agent 是独立 AIAgent（`quiet_mode=True`），会话只写 `_hermes/评论会话/*.json`，**完全不写 state.db sessions 表**。侧边栏「FEISHU」分类（读 `GET /api/profiles/sessions` / list_sessions_rich，只含聊天会话）永远看不到评论会话——这是数据管线隔离，不是显示 bug。用户问「评论会话在客户端哪能看到」先答根因（数据不在 state.db），看评论会话只能去 Obsidian 目录；若要让其进 Hermes UI，需插件后端直接读 JSON 目录（如 channel-sessions 加评论视图），不能靠侧边栏
+- **文件名编码格式与解码**：会话 key = `comment:{项目}:{open_id}`（**两个冒号**），percent-encode 后 `%` → `_pct_`，文件名形如 `comment_pct_3A_<编码项目>_pct_3Aou_xxx.json`；归档文件在 open_id 后追加 `_YYYYMMDD_HHMMSS` 时间戳后缀。解码三步：① regex 剥离归档时间戳（`_\d{8}_\d{6}$`）② `_pct_` 还原成 `%` ③ `unquote` 后 `split(":")`（≥3 段且 parts[0]=="comment"，open_id 可能含 `:` 用 join 兜底）。⚠️ 两个实测坑：**不能切固定前缀 `comment_pct_3A_` 再解码**（会把首个 `%` 标记切残，项目名乱码如 `pct_E4��妖记`）；**不剥时间戳则归档会话 open_id 被污染**、真名反查失败。channel-sessions 插件 `service.py` 的 `_decode_comment_key` 是现成实现
+- **消息结构（展示时拆三段）**：user 消息 = 完整 prompt 文本，含 `The user added a reply in "<doc>"`（或 comment）/ `Current user comment text: "<text>"` / `Original comment text: "<text>"`（可选）/ `Quoted content: "<text>"`（可选）+ timeline + 系统指令；assistant 消息 = 纯 markdown 回复。展示拆「在哪个文档评论 + 评论正文 + 引用原文」三段；JSON **不存单条消息时间**，只能按消息序从 `last_access` 倒推（60s/条）。解析实现参考 channel-sessions `service.py` 的 `_parse_comment_message`
 - 回复自动 @ 评论发起人（person/mention_user element）
 - 状态指令：评论里发「评论状态/会话状态」→ 直答不跑 agent
 - 画像沉淀：prompt 指示 agent 输出 `OBSERVATION: <事实>` 行 → 代码剥离并写入成员画像（低频去重，一天≤2条）
+- **并发模型：per-session 锁排队（2026-08-11 确认，无 interrupt/steer）**：`feishu_comment.py` `_session_locks`（`Dict[str, asyncio.Lock]`），`handle_drive_comment_event` 在 `async with lock` 内跑 agent（`run_in_executor`）。同 key（`comment:{项目}:{open_id}`）事件**串行排队**——agent 忙时新评论等锁，不丢不打断；不同 key（跨项目/跨用户/未路由文档）**并行**。与聊天 agent 的 gateway busy_input 三态（interrupt/queue/steer）完全无关——评论是事件驱动独立 agent 实例，无常驻会话可注入，天然 queue 语义。用户拍板「评论排队就行」不改（2026-08-11）
 
 ## 4. 评论协作扩展（接入多用户协作体系）
 

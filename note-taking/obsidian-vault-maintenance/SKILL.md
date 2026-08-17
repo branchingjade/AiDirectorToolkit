@@ -121,11 +121,24 @@ related:
 2. **MOC 枢纽 + wikilink**：建 `_hermes/记忆MOC.md` 之类索引页，wikilink 串起所有相关笔记，图谱里形成一支
 3. **graph.json 由用户在 Obsidian 图谱界面自己配颜色**（UI 操作存进 graph.json 并保留）——agent 不写该文件
 
-**⚠️ 升级会清空全部颜色组（实测 2026-08-07，Obsidian 1.13.4）**：Obsidian 自动升级后首次打开图谱，`colorGroups` 被重置为 `[]`——用户 UI 配的 8 组颜色（犬子无双/Hermes运维/工具/日志/复盘/规范/剧本库 path/飞书协作）全部丢失。「UI 写入会保留」只在**同版本内**成立，跨版本升级不保证。诊断路径：`%APPDATA%/Roaming/obsidian/obsidian.log` 查 `Loaded updated app package obsidian-<版本>.asar` 确认升级时间点；对比 `.obsidian/graph.json` mtime 与 Obsidian 进程启动时间（`powershell Get-Process Obsidian | Select StartTime`），吻合即升级后首次打开图谱用空视图覆盖了 colorGroups。旧颜色值不可精确恢复（git 忽略 graph.json、备份不含 vault），只能按新方案重配。当前 vault 实际落地 **12 组配色**（剧本库 4 组 + 项目 3 组 + 运维工具 3 组 + 内容 2 组；根目录 4 个文件点数太少不配，默认色即可），完整清单（query + RGB hex）在 vault 内 `图谱颜色分组.md`——既是手动重配的对照表，也是 cron 自动恢复的数据源。
+**⚠️ 升级会清空全部颜色组（实测 2026-08-07，Obsidian 1.13.4）**：Obsidian 自动升级后首次打开图谱，`colorGroups` 被重置为 `[]`——用户 UI 配的 8 组颜色（犬子无双/Hermes运维/工具/日志/复盘/规范/剧本库 path/飞书协作）全部丢失。「UI 写入会保留」只在**同版本内**成立，跨版本升级不保证。诊断路径：`%APPDATA%/Roaming/obsidian/obsidian.log` 查 `Loaded updated app package obsidian-<版本>.asar` 确认升级时间点；对比 `.obsidian/graph.json` mtime 与 Obsidian 进程启动时间（`powershell Get-Process Obsidian | Select StartTime`），吻合即升级后首次打开图谱用空视图覆盖了 colorGroups。旧颜色值不可精确恢复（git 忽略 graph.json、备份不含 vault），只能按新方案重配。当前 vault 实际落地 **13 组配色**（剧本库 4 组 + 项目 3 组 + 运维工具 3 组 + 内容 2 组 + 前端设计 1 组玫红；根目录 4 个文件点数太少不配，默认色即可），完整清单（query + RGB hex）在 vault 内 `图谱颜色分组.md`——既是手动重配的对照表，也是 cron 自动恢复的数据源。
 
-**⚠️ cron 已纳入颜色自动恢复（2026-08-07）**：知识库每日巡检（job d466e0d36bc2，每晚 22:00）与知识库每周大维护（job 3319ff2ddaa6，周日 22:00）均检查 `.obsidian/graph.json` 的 colorGroups 组数——<12 组时先 `tasklist | grep -i obsidian` 查进程：Obsidian 未运行则按 `图谱颜色分组.md` 清单自动写回（写入格式 `{"query": "...", "color": {"a": 1, "rgb": 0xRRGGBB}}`，保留其他字段，写后验证组数=12）；Obsidian 运行中则只报告「⚠️ 需手动」，不硬写（运行时写必丢）。升级清空颜色后由巡检自动兜底，无需等用户发现。
+**⚠️ cron 已纳入颜色自动恢复（2026-08-07）**：知识库每日巡检（job d466e0d36bc2，每晚 22:00）与知识库每周大维护（job 3319ff2ddaa6，周日 22:00）均检查 `.obsidian/graph.json` 的 colorGroups 组数——<13 组时先 `tasklist | grep -i obsidian` 查进程：Obsidian 未运行则按 `图谱颜色分组.md` 清单自动写回（写入格式 `{"query": "...", "color": {"a": 1, "rgb": 0xRRGGBB}}`，保留其他字段，写后验证组数=13）；Obsidian 运行中则只报告「⚠️ 需手动」，不硬写（运行时写必丢）。升级清空颜色后由巡检自动兜底，无需等用户发现。⚠️ 新增/调整颜色组时**必须同步更新 `图谱颜色分组.md` 的组数与清单**——cron 按该文件写回，清单过期 = 恢复后组数不对。
 
 每个文件按目录归属携带对应颜色标签。标签统一用中文名，不混用大小写和缩写。标签用纯文本格式，不在 tags 中使用 `[[wikilink]]`。
+
+### 新建知识分区的完整流程（2026-08-10 前端设计分区实例）
+
+用户要求「新建/丰富某个知识分区」（如前端设计、技术专题）时，不是只写几篇 md 就完——分区的落地闭环是：
+
+1. **规划分区结构**：先列主题清单（每篇文档管什么 + 核心权威出处），再动手写；多文档分区一次建齐，不要一篇篇挤
+2. **文档规范**：frontmatter 首标签 = 分区名（如 `前端设计`，图谱按 path 分组时 tag 与 path 并存）；每篇带 `date` + `related`（YAML 列表）
+3. **分区 MOC**：分区内建 `<分区名>MOC.md` 作索引（文档清单 + 应用场景 + 实战对照速查 + 维护说明）
+4. **总 MOC 登记**：总 `MOC.md` 加分区小节，列全文档 + 一句话描述
+5. **图谱配色**：`图谱颜色分组.md` 登记新色组（色/hex/查询/覆盖数）+ Obsidian 退出后写 graph.json（见「颜色分组」章节铁律）
+6. **git 提交**：`git add 分区目录 MOC.md 图谱颜色分组.md`，一次 commit（graph.json 被 .gitignore 忽略不用 add），conventional commit 格式
+
+⚠️ 图谱颜色分组.md 的「覆盖数」是手写统计，随分区增长会过时——只登记时写一次即可，不必每次新增文档都改（图谱组数/查询条件才是 cron 恢复的关键，覆盖数仅供参考）。
 
 ### 图谱健康度
 

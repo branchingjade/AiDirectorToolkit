@@ -13,6 +13,24 @@ metadata:
 
 ACE Studio 2.0 是一个 AI 驱动的音乐工作站，核心理念：MIDI + 歌词 → AI 人声，MIDI → AI 乐器演奏。
 
+## Suno → ACE Studio 提示词转换（2026-08-13 实战）
+
+用户把 Suno Style 换成 ACE Studio 提示词时，先说明差异：**ACE 没有 Style 字段**，两条路径：
+
+1. **Inspire Me（最接近 Style 的输入）**：把 Suno Style 翻译成完整歌曲描述——风格流派 + BPM + 调性 + 拍号 + 人声类型 + 逐段落情绪轨迹（含每段的乐器/力度/人声状态）+ 乐器清单。中文描述即可，ACE 界面中文。
+2. **手动工程参数**（Inspire Me 结果不理想时按这个搭）：
+   | 项目 | 参数 |
+   |---|---|
+   | Transport | BPM、拍号（双击输精确值） |
+   | Chord Track | 全曲和弦进行（含副歌属和弦、间奏半音下行） |
+   | 人声轨 | 选支持中文的声库；Vocal Controls：主歌 Soft/Breathy 拉高、副歌 Power 拉满 |
+   | 乐器轨 | 按段落分配（钢琴主歌主导 → 弦乐 pad 预副歌 → 失真吉他/铜管/合唱副歌 → 鼓预副歌起） |
+   | 歌词 | 每音符一音节，长音 `-` 连字符 melisma |
+
+## ⚠️ .drp 扩展名鉴别陷阱（2026-08-13 实测）
+
+`.drp` 不一定是 ACE Studio 工程——**DaVinci Resolve 工程也是 .drp**。鉴别：unzip 后看 project.xml 头——`DbAppVer` / `SM_Project` / `FieldsBlob` / `MediaPool` / `SeqContainer` = 达芬奇工程（达芬奇 Studio 21 格式）；ACE Studio 工程结构不同。用户发来 .drp 时先解压鉴别再按对应格式解析（达芬奇工程：工程名/时间线片段数可从 project.xml 与 SeqContainer/<uuid>.xml 提取，素材文件名在 FieldsBlob 二进制里，无明文路径；剧本文本/歌词不在此类文件中）。
+
 ## MCP 连接（已配置）
 
 Windows STDIO 模式，已在 Hermes config.yaml 中配置：

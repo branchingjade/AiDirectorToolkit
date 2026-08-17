@@ -187,11 +187,72 @@ skill_view 的 linked_files 只识别 `references/`、`templates/`、`scripts/`�
 
 用户原话："知识库的美学、经验等是要贯穿所有的创作的"——知识库是**土壤层**，不属于任何一棵树（电影树/短剧树/提示词工具），所有树从同一片土壤长。评估 skill 价值时用户会问"skill 有没有正向作用"——知识库接进创作流程（知识库先行）才能让故事更好，只当参考资料放着=白挖。
 
-## 坑：Obsidian wikilink 转义（\| 变 \\|，2026-08 踩到）
+## SKILL.md 膨胀诊断与瘦身手术（2026-08 director-aesthetic-card 实战，196KB→93KB）
+
+**症状**：子代理加载 skill 时内容不完整/被剪裁（上下文压缩 `[SKILL_PRUNED]`）、或子代理误报"SKILL.md 100K 上限"——**没有文件大小硬上限**，但超大 SKILL.md 进上下文时有预算，超出部分被压缩剪裁，子代理看到不完整指导。196KB bytes（≈99K chars）必触发；**目标 <50K chars**（健康基线：妖玉影视知识库 31KB bytes / 13K chars）。
+
+### 诊断（先量化再动手）
+
+```python
+lines = open("SKILL.md", encoding="utf-8").read().split("\n")
+# 定位各 ## 章节边界 → 计算每块字符数 → 找出冗余块（本案例三大块占 52%）
+# 超长行定位：awk '{print length($0), NR}' SKILL.md | sort -rn | head
+```
+
+常见冗余块（本案例）：
+- **历轮实测记录**（"XX轮 2026-08 实测有效"逐轮堆叠）→ 移 `references/rounds-log.md`
+- **编号坑库**（㉟㊱㊲…㊿ 40+ 坑）→ 移 `references/pitfalls-log.md`
+- **参考登记**（逐轮来源地图登记，linked_files 会自动列出全部 references，正文登记冗余）→ 移 `references/reference-index.md`
+
+### 手术流程（零丢失）
+
+1. **git 快照保护**（必须先做）：`git add -A && git commit -m "瘦身前快照"`——出任何错 `git checkout <快照>` 秒回滚
+2. **移动而非删除**：被移出的块先完整落盘到 references/ 三文件（skill_view 的 linked_files 会自动列出，无需正文登记），再重写 SKILL.md
+3. **正文留指针**：被移内容处放一行指针（"坑库→references/pitfalls-log.md"），核心指导章节原样保留
+4. **关键指令前置**：移出的坑库若原在正文常驻可见，移出后必须**在 SKILL.md 工作流顶部加显式第 0 步**（"写卡前先 skill_view 加载坑库"）——否则子代理不知道要查，坑可见性从"自动带"变"必须查"，行为等价才成立
+5. **commit 手术结果**
+
+### 四层自测（客观评估，不用口头声称）
+
+| 层 | 方法 | 验证点 |
+|---|---|---|
+| ① 正文加载 | `skill_view(name=...)` | content 完整无剪裁、章节齐全 |
+| ② 按需加载 | `skill_view(file_path='references/xxx.md')` | 移出文件可正常加载 |
+| ③ 零丢失 | `git show <快照>:SKILL.md` 逐行 diff 迁移块+核心块 | 迁移块在新文件逐行在、核心块逐行保留 |
+| ④ 真实子代理 | delegate_task 让独立子代理加载 skill 并回答关键指令是否可见 | **能抓到自查漏掉的问题**（本案例抓到第 0 步位置欠佳 + 字面 \n 残留） |
+
+### 坑
+
+- **字面 `\n` 残留清理要分类**：段落间残留（修复）vs 代码示例内合法转义（re.sub/noteTA 里的 `'\n'`，保留）——批量 `replace("\\n","\n")` 会误伤代码示例，按前后文锚点精准替换
+- **恢复错插内容时用 git checkout 而非手动拼接**：手动从旧版截取片段恢复可能把大段旧内容错插回文件（本案例文件一度从 47K 涨回 92K），`git checkout <手术commit> -- SKILL.md` 一步回到干净态
+- **f-string 内不能有反斜杠**（`f"...{re.findall(r'\\n', s)}..."` 报 SyntaxError）——校验脚本里反斜杠处理放到 f-string 外
+
+
 
 MOC/索引文档里写 wikilink 别名 `[[路径/文件|别名]]` 时，**在 Python 字符串或 markdown 表格里 `\|` 会被转义成两个反斜杠 `\\|`**，Obsidian 解析为路径含 `\` 导致链接断裂（现象：MOC 链接全部"缺失"）。正确做法：
 - 表格里用 `\|`（markdown 转义管道）时，Python 侧写 `\\|`，且写完用 `chr(92)` 替换确认单反斜杠
 - 最稳：**不用表格/别名**，直接写纯 wikilink 列表 `[[分类/路径/文件名.md]]`（Obsidian 自动显示文件名，零转义风险）
+
+## 平台能力约束升级（跨 skill 联动，2026-08 Seedance 2.0→2.5 实战）
+
+模型/平台能力升级（时长上限 15s→30s、模型版本 2.0→2.5、素材上限等）会牵动整个 skill 套件——**同一约束散落在多个 skill 的 SKILL.md / REFERENCE.md / 知识库 references**，只改一个文件必漏。标准流程：
+
+1. **全目录 grep 找全落点**：`grep -rn "15s\|15 秒" skills目录 --include="*.md"`——约束藏在 SKILL.md、REFERENCE.md、制作层链路.md、学科密码、回测文档各处
+2. **区分「当前约束」与「历史取证」**：
+   - 当前约束（硬上限/黄金参数/API 参数/规格表）→ 升级
+   - 历史取证（S 编号来源引用、论文链接、CHANGELOG 旧条目）→ **保留原文**，改了就失真
+   - 回测文档的缺口结论 → 保留原文 + 加 `📌 2026-XX-XX 更新：` 注记（防误导复用，不篡改历史）
+3. **规格同步不止改一个数**：换模型版本要连带核对依赖规格——2.0→2.5 案例：素材上限 9图3视频→30图10视频10音频、分辨率从 480p~4K 变成仅 480p/720p、新增任务类型误判防护（prompt 禁出现"编辑/延长/增加/删除"等词，编辑/延长任务 duration 仅 -1、ratio 仅 adaptive）
+4. **版本三处一致 + CHANGELOG**：frontmatter description、version、正文 H1 标题三处同步升版，references/CHANGELOG.md 加条目（含「来源」）；顺带修复发现的版本漂移（如 AI电影导演 frontmatter 1.3.4 vs 标题 1.3.1 不一致——升版时统一）
+5. **内部锚点同步（高频漏网）**：章节标题含版本号时（如「平台约束参考（Seedance 2.0）」→2.5），GitHub 风格锚点 `#xxx-20` 变 `#xxx-25`——必须 grep 全库更新引用处（`#四平台约束参考seedance-20` → `seedance-25`）
+6. **提交纪律**：`git add` 精确到本次改动文件列表，**不要 `git add -A`**——skills 工作区常混有会话前遗留的未提交改动（其他 skill 版本升级等），一并提交会污染本次变更；先 `git status --short` 区分，再逐文件 add
+
+### 升级后自检（约束反转必跑）
+
+- grep 旧约束残留（`硬上限 15`/`≤15s`/旧模型 ID），排除历史取证后应为零
+- version=H1=description 三处一致（`grep -m1 "^version:"` vs `grep -m1 "^# <名> v"`）
+- 内部锚点引用核对——标题改动后 `#xxx-20` 类锚点是否断裂
+- 历史取证文件（S 编号来源、论文链接、CHANGELOG 旧条目）确认未被误改
 
 ## 版本漂移修复（升级前体检必做）
 
@@ -242,3 +303,38 @@ gh release create "ai-screenwriter-assistant-vX.Y.Z" --title "AI短剧编剧助�
 3. `/bin/cp` 本地新 SKILL.md 到远程结构新路径
 4. `git add -A && git commit -m "merge: <说明>" && git push`
 5. **验证**：`git status --short` 干净 + `git ls-tree` 确认唯一结构 + `diff` 本地与仓库一致
+
+## 双仓库副本分叉排查（push 被拒先查这个，2026-08-17 实战）
+
+**症状**：`git push` 报 `Updates were rejected because the tip of your current branch is behind its remote counterpart`，且 `git rev-list --count HEAD..origin/master` 很大（几十个提交）。**先别急着 pull --rebase / force push**——先查是不是本机存在第二个仓库副本双写同一远程（2026-08-17 实测：`Documents/ClaudeCode/AiDirectorToolkit` 副本用 `AI-Skills <ai-skills@seedance.dev>` 身份推了 60+ 提交，主工作区 `AppData/Local/hermes/skills` 不知情，两边分叉）。
+
+### 排查三步
+
+```bash
+# 1. 看分叉点时间——merge-base 过早（隔了几天）= 双线分叉
+git merge-base HEAD origin/master && git log --format="%h %ad %s" --date=short -1 <merge-base>
+
+# 2. 看远程提交作者——出现陌生身份（非本机 git config user.name）= 另一环境在推
+git log --format="%an <%ae>" origin/master | sort | uniq -c
+
+# 3. 找本机其他仓库副本——同名/同 remote 的 .git 就是元凶
+find C:/Users/HMSJ -maxdepth 4 -name .git -type d 2>/dev/null | grep -v "AppData/Local/hermes/skills\|node_modules\|\.cache"
+git -C <候选副本> remote -v   # 对比 remote 是否同一 URL
+git -C <候选副本> log --format="%an <%ae>" -3   # 看身份是否匹配陌生作者
+```
+
+### 安全处置（副本删除前必须确认）
+
+副本内容是否已全部在远程：`git -C <副本> log origin/master..HEAD` 为空 + `git status --short` 干净 + 无 stash + 无未推送 tag——全部满足才可删副本（内容在远程，删本地零损失）。
+
+### 跨线推送（不 rebase 本地线、不 force）
+
+```bash
+git worktree add C:/tmp/push origin/master   # 基于远程最新开独立工作树
+cd C:/tmp/push && git cherry-pick <本地提交>  # 只搬本次提交
+# 冲突时取本次版本（git checkout --theirs <file> 对 cherry-pick 是取被搬入的一侧）
+git push origin HEAD:master                   # 远程历史一条不动
+cd <主工作区> && git worktree remove C:/tmp/push --force
+```
+
+**⚠️ 不要 `git reset --soft origin/master` 同步本地 master**：本地 skills 目录含远程没有的大量本地 skill（lark-*、apple、mlops 等整目录），reset 会把它们全部 staged（实测 2000+ 文件）——本地 master 保持原状即可，远程已拿到该拿的提交。

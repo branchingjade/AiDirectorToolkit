@@ -118,6 +118,51 @@ if text_before_strip != text:
 - `gateway/config.py:1207-1208` — `free_response_channels` **已 bridge**（但 adapter 不读取它——零引用）
 - `gateway/config.py` — `group_rules` **未 bridge**（grep 确认零引用），需手动添加 bridge 代码
 
+## 根因类别二：bot 不在话题所在会话里（消息从未推送，实测 2026-08-08）
+
+**症状**：用户在话题里 @Hermes，绿色对勾（消息已发出），但 gateway 日志里**该时段零记录**——连 "Received raw message" 都没有。这不同于类别一（到达后被丢弃），是飞书 WebSocket 根本没推送事件。
+
+**最常见根因**：话题开在**用户之间的 p2p 私聊**里（如「魏宁馨和徐学环的会话」），Hermes bot 不是该会话成员。飞书只把消息事件推送给会话内成员，非成员的 bot 收不到任何消息，即使被 @。P2P 私聊无法拉 bot 进群，此情况**无解于代码**——只能换会话。
+
+**诊断命令链**（user 身份，无需 bot 权限）：
+
+```bash
+# 1. 找话题所在会话：列出所有 p2p，识别 p2p_target_type=user（用户-用户私聊）vs bot
+lark-cli im +chat-list --as user --types=p2p --page-all
+# 命中特征：chat_mode=p2p + p2p_target_type=user + name 是对方脱敏名（如「用户133976」）
+#   —— 这就是两人私聊，bot 不在里面
+
+# 1.5 最硬验证（实测 2026-08-08 二次确认）：直接列会话成员，bot_total=0 实锤 bot 非成员
+lark-cli im +chat-members-list --as user --chat-id oc_xxx
+# 输出 `Found 2 user(s) and 0 bot(s)` + data.bot_total: 0 → bot 不在会话里，无代码可解
+# 成员名单顺带证明：该 p2p 会话成员 = 仅两位用户，任何第三方都不在其中
+
+# 2. 确认该会话内容与话题（话题标题=会话名，如「来自: 魏宁馨和徐学环的会话」）
+lark-cli im +chat-messages-list --as user --chat-id oc_xxx --page-size 30 --order asc
+
+# 3. 话题内消息（确认 @Hermes 确实发出去了）：
+#    从步骤 2 的 JSON 里拿 thread_id（omt_xxx 字段），再：
+lark-cli im +threads-messages-list --as user --thread-id omt_xxx --order asc
+
+# 4. 对照 gateway.log：该时段搜不到 message_id / "Received raw message" → 实锤未推送
+grep "00:3[0-5]" "$LOG_DIR/gateway.log"
+```
+
+**修复方案**（三选一）：
+- 在 bot 所在的群（如「开工」群 oc_685820a739882df67954e0923ec9ab73）里开话题 @Hermes
+- 直接私聊 Hermes bot（bot 所在 p2p，chat-list 里 p2p_target_type=bot 的）
+- 建一个包含 bot 的新群，把相关成员拉进来
+
+**用户常问：私聊话题里 @ 其他成员会怎样？→ 一样收不到（实测 2026-08-08）**
+- @ 会话内成员（该 p2p 的两人）→ ✅ 正常收到
+- @ 任何非会话成员（人 or bot 一律）→ ❌ 收不到——飞书只把消息事件推送给会话内成员，@ 只是提醒语义，不改变推送范围
+- 证据链（用户追问「确定吗，有依据？」时用这两条实测答复，不要只讲机制推论）：①`+chat-members-list` 列成员名单（`bot_total: 0` 实锤 bot 非成员）②gateway.log 该 chat_id 零出现（连 "Received raw message" 都没有）
+- 让 bot 参与的唯一途径 = 让它成为会话成员（新群/私聊 bot），私聊话题无第三方入口
+
+**工具坑**：
+- `+chat-messages-list` 的 stdout 可能带 warning 行前缀（如 `warning: reactions_partial_failed: ...`），直接 `json.loads` 会报 `Expecting value`——先剥离第一行 warning 再解析
+- `+messages-search` 需要 `search:message` scope，未授权时返回 `missing_scope` 而非数据；查话题内容用 `+threads-messages-list` 不需要该 scope
+
 ## 已确认的根因
 
 **飞书 API 行为**: 当消息带有 `parent_id`（话题回复/引用回复），飞书不在 `message.mentions` 中包含 @提及信息。此时 `_mentions_self()` 无法通过 mentions 数组检测到 @Bot，只能依赖文本内容中的 `@_all` 或 normalize 后的二次检测。

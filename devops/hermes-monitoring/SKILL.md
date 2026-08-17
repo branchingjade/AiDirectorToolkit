@@ -69,15 +69,43 @@ SELECT SUM(input_tokens), SUM(output_tokens), SUM(reasoning_tokens),
 FROM sessions;
 ```
 
+### 按任务类别聚类（哪类任务最耗 token）
+按会话标题正则归类统计 tokens/费用：完整脚本与坑见 `references/token-by-task-class.md`。**推荐直接用 `scripts/task-cost-classify.py`**（改进版：额外处理无标题子代理会话，费用按人民币）。
+
+### Cost in RMB（DeepSeek 原生人民币计费）
+`estimated_cost_usd` 是 Hermes 按官方快照换算的美元估算；**DeepSeek 实际按人民币计费**（用户明确要求费用用人民币报）。报钱数按官方人民币价重算：flash 输入命中 0.02 / 未命中 1 / 输出 2 元每百万，pro 0.025 / 3 / 6 元每百万。定价表与计算函数见 `references/deepseek-cny-pricing.md`。
+
 ## Reading state.db Safely
 
-Hermes holds a write lock on state.db while running. Copy first:
-```bash
-cp "$HERMES_HOME/state.db" /tmp/state_copy.db
-python3 -c "import sqlite3; db = sqlite3.connect('/tmp/state_copy.db'); ..."
+⚠️ **WAL 陷阱（实测 2026-08-08）**：Hermes 运行时 state.db 是 WAL 模式（同目录有 state.db-wal / -shm）。`cp` 只复制主文件，**复制出的副本可能是空库**——1.58GB 主文件复制后 `sqlite_master` 查不到任何表（表结构/数据大部分在 WAL 里未 checkpoint）。先 cp 再查会白忙一场。
+
+正确做法：**只读 URI 直连原文件**（SQLite 允许多读，Hermes 正在运行也不冲突）：
+
+```python
+import sqlite3
+db = sqlite3.connect('file:C:/Users/<user>/AppData/Local/hermes/state.db?mode=ro', uri=True)
 ```
 
-On Windows: `C:\Users\<user>\AppData\Local\hermes\state.db`
+On Windows: `C:\Users\<user>\AppData\Local\hermes\state.db`（路径用正斜杠 + `?mode=ro`）
+
+## Runtime Health Check（网关/服务存活探测）
+
+被问「网关正常吗」或排查服务存活时——**不要跑 `hermes gateway status/start`**（可能触发 update 恢复流程连带停 gateway，见 hermes-maintenance）。改用被动探测三件套：
+
+```bash
+# 1. 端口监听（gateway 活着的最硬证据）
+netstat -ano | grep LISTENING | grep -E ":(8644|9119)"
+#    8644 = webhook 平台（gateway 进程内）  9119 = 远程 serve  9222 = CDP 浏览器  41595 = Eagle（无关）
+# 2. 日志新鲜度（logs/ 下 gateway.log mtime 在几分钟内 = 正在跑）
+ls -lt "$LOCALAPPDATA/hermes/logs/" | head
+# 3. 进程确认（大内存 python.exe = gateway 主进程）
+tasklist | grep -i python
+```
+
+logs 里常见的「噪音」≠故障：
+- `PermissionError: delegate_task child contexts cannot mutate Kanban tasks or boards` —— kanban dispatcher 防护性报错（子代理上下文禁改 kanban），设计内，忽略
+- `Skill 'X' maps to slash command /ai already claimed by ...` —— 中文 skill 斜杠命令冲突（多个 skill 抢 /ai），只影响快捷指令，不影响 skill 加载
+- `check_web_api_key returned False` —— web_search/web_extract 被凭据 gate 住，诊断链路见 `references/web-tools-backends.md`
 
 ## Credential Health
 
@@ -86,6 +114,8 @@ hermes auth list  # Shows providers, key count, status
 ```
 
 For programmatic access in Python plugins, import Hermes auth internals or parse CLI output.
+
+Web 工具集（web_search/web_extract）的凭据 gate 与后端选型/定价：见 `references/web-tools-backends.md`。
 
 ## Dashboard Integration
 

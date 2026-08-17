@@ -103,6 +103,46 @@ powershell -NoProfile -Command "\$dir = \"\$env:USERPROFILE\\.foo\"; Remove-Item
 
 Note: `\\` for literal backslash in directory separators inside double-quoted PowerShell strings.
 
+## 复杂逻辑一律写 .ps1 文件执行，不要内联 -Command（2026-08-10 三连踩坑）
+
+内联 `-Command "..."` 在 bash 双引号里，**每一个 `$`（`$c`、`$_`、`$env:...`）都可能被
+bash 展开吞掉**——哪怕只写 `if ($c) {...}` 也会变成 `if () {...}` 报「if 语句缺少条件」。
+`$_`（ForEach-Object 管道变量）同样被吞。单引号包 -Command 可以挡 `$`，但引号嵌套又引入
+新问题。**多步/带变量/带管道过滤的 PowerShell，直接 write_file 写 .ps1 再
+`powershell -NoProfile -ExecutionPolicy Bypass -File x.ps1` 执行**——零转义地狱。
+
+### ⚠️ .ps1 必须是 UTF-8 with BOM（PowerShell 5.1 无 BOM 按 ANSI/GBK 解析）
+
+write_file 落盘的 .ps1 是 **UTF-8 无 BOM**。PowerShell 5.1 对无 BOM 文件按系统 ANSI
+代码页（中文系统=GBK）解析 → UTF-8 的中文注释/em dash（`—`，E2 80 94）字节错位 →
+解析器报**假语法错**（如「字符串缺少终止符」）且**报错行号漂移**（错误指向相邻行，
+内容错位显示）。现象非常误导：文件肉眼完全正确，PowerShell 就是炸。
+
+**落盘后必加 BOM**（3 行 python，任何 .ps1 写完后跑）：
+```bash
+python -c "
+p = r'C:\path\to\script.ps1'
+data = open(p, 'rb').read()
+if not data.startswith(b'\xef\xbb\xbf'):
+    open(p, 'wb').write(b'\xef\xbb\xbf' + data)
+"
+```
+
+### ⚠️ write_file 会把 `\"` 原样写进文件（JSON 转义泄漏）
+
+write_file 的 JSON 传输转义会在 .ps1 里留下字面 `\"`（如 `Write-Output \"9120 DOWN\"`），
+PowerShell 解析报「字符串缺少终止符」。**落盘后先 `grep -n '\\\\\"' script.ps1` 核对**，
+有反斜杠立即 patch 掉；或用 `od -c` 看实际字节。不要写完直接跑——先验文件内容。
+
+### bash 里查 PowerShell 变量内容的替代
+
+内联查端口/进程等简单只读探测，能不用 `$` 就别用：
+```bash
+# 用 curl/netstat 替代 Get-NetTCPConnection（无 $ 变量）
+netstat -ano | grep ":9120" | grep LISTENING
+# 或把探测逻辑也写进 .ps1（带 BOM）执行
+```
+
 ## 计划任务环境读不到进程 CommandLine（WMI 权限遮罩）— 2026-08-07 实测
 
 **现象**：计划任务跑 PowerShell 检测脚本，`Get-CimInstance Win32_Process` 能枚举进程（Count 正常），但读 `CommandLine` 属性返回**空字符串** → 按命令行匹配的检测逻辑（如 `Where-Object { $_.CommandLine -match 'xxx' }`）永远匹配失败，误判「进程不存在」。
@@ -128,6 +168,37 @@ Get-CimInstance Win32_Process -Filter "Name like 'python%'" | Select-Object -Exp
 
 **排查思维（用户纠正）**：监控/自愈工具误报时，先验证「核心检测机制在目标运行环境下是否真能拿到信号」，别急着在坏检测上加兜底——「不是缺兜底，是工具本身就干不了活」。
 
+## 端口绑不上 `listen EACCES` — 先查 Windows 排除端口范围（2026-08-14 实测）
+
+**现象**：Node/服务监听某端口报 `EACCES: permission denied 127.0.0.1:<port>`，但 `netstat -ano | grep <port>` 查无任何进程占用——端口"看起来空的"却绑不上。
+
+**根因**：**Windows 把一段端口划进排除范围（Hyper-V / WSL / 系统保留）**，普通进程无权绑定。本机实测 3080 落在 `3001-3100` 保留区间内。排除范围是动态的（Hyper-V 会话启动会扩展），不是固定写死的。
+
+**诊断命令**：
+```bash
+# ①确认无进程占用（排除"端口被占"）
+netstat -ano | grep ":3080"
+# ②列出 TCP 排除范围，看目标端口是否落在某区间
+netsh interface ipv4 show excludedportrange protocol=tcp
+# Start Port    End Port
+#      3001        3100      ← 3080 在这里面 → EACCES 实锤
+```
+
+**修法**：换一个不在任何排除区间的端口（`netsh` 输出里相邻区间之间的空隙都安全）。服务一般支持 `--port` 参数覆盖。不要试图从系统排除范围里踢掉该端口（需管理员 + 系统级修改，不干净，且 Hyper-V 重启会重新保留）。
+
+## MSYS `/tmp` 路径与 Windows 原生 exe 的"文件凭空消失"（2026-08-14 实测）
+
+**现象**：`curl -o /tmp/foo.md <url>` 返回 200 且报下载了 N 字节，随后 `cat /tmp/foo.md` / `read_file /tmp/foo.md` 全部报 **No such file or directory**——文件像是"写成功了又没了"。
+
+**根因**：`curl` 解析成了 **Windows 原生 curl.exe**（非 MSYS curl），它不认识 MSYS 路径 `/tmp/foo.md`，把 `/tmp/` 当成 Windows 盘符根路径 → 实际写到 `C:\tmp\foo.md`（或当前盘根的 tmp）。而 bash 的 `cat /tmp/foo.md` 走 MSYS 映射（通常是 `$LOCALAPPDATA\Temp` 之类），两边路径完全不同。
+
+**修法**（任选）：
+- **输出到 stdout 直接看**：`curl -sL <url> | head -100`——零路径问题（本会话最快解法）
+- 或用 bash 能确认的路径：`-o "$HOME/foo.md"`（MSYS 会正确翻译给子进程）
+- 落盘给后续工具读时，用 `$PWD` 相对路径或显式 Windows 绝对路径 `C:/...`
+
+**辨别谁在跑**：`type -a curl` 看第一个命中是 `/mingw64/bin/curl`（MSYS）还是 `C:\Windows\System32\curl.exe`（Windows 原生）。本机两者都可能出现在 PATH 前面。
+
 ## Common pitfalls
 
 | Symptom | Cause | Fix |
@@ -139,6 +210,8 @@ Get-CimInstance Win32_Process -Filter "Name like 'python%'" | Select-Object -Exp
 | bcdedit path 反斜杠被吃掉 | bash 把 `\W` `\E` 等当作转义处理 | 用单引号：`bcdedit /set {id} path '\Windows\...'`；不要用双引号和 cmd /c |
 | `bcdedit /set` path values lose backslashes | bash treats `\\` as escape char; `\\Windows` → `Windows` | Use **single quotes**: `bcdedit /set {id} path '\\Windows\\system32\\winload.efi'`. Double quotes, `\\\\`, and `cmd /c` all fail. |
 | 计划任务检测脚本报「进程不存在」但进程在跑（gateway/watchdog 类） | WMI 对非管理员遮罩 CommandLine：`Get-CimInstance` 枚举正常但 `CommandLine` 返回空 → 按命令行匹配必然误判 | 改用端口监听（netstat LISTENING）作主判据，或计划任务提权 `<RunLevel>HighestAvailable</RunLevel>`（枚举值不是 Highest）；详见上方「计划任务环境读不到进程 CommandLine」节 |
+| 服务监听端口报 `listen EACCES` 但 netstat 查无占用 | 端口落在 Windows 排除范围（Hyper-V/WSL 保留，如 3001-3100 含 3080） | `netsh interface ipv4 show excludedportrange protocol=tcp` 确认，换排除区间外的端口（服务一般支持 `--port`） |
+| `curl -o /tmp/x` 报成功但 `cat /tmp/x` 找不到文件 | `curl` 是 Windows 原生 curl.exe，把 `/tmp/` 当盘符根路径写到 `C:\tmp\`，bash 的 `/tmp` 是 MSYS 映射目录 | 直接 `curl ... \| head` 看 stdout；或 `-o "$HOME/x"`；`type -a curl` 辨别是 MSYS 还是 Windows 原生 |
 
 ## .env 文件加载（git-bash）
 

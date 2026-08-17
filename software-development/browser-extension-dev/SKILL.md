@@ -86,6 +86,8 @@ Chrome 加载：`chrome://extensions` → 开发者模式 → 加载已解压 �
 
 - Chrome MV3 content script 不支持 `<script type="module">` 直接 import，所以用 cat 拼接而非 ES module
 - bridge.js（MAIN world）不能合并到 content.js（ISOLATED world），需独立加载
+- **content script（ISOLATED world）看不到页面 JS 设置的 expando 属性**（如 React 的 `__reactFiber$xxx`）——`Object.keys(element)` 返回空。凡是要扫描 React fiber、调用页面内部函数（如平台写入函数）的，必须放 MAIN world bridge.js 里做，content 走 postMessage 协议。完整方法见 `references/react-spa-extension-adaptation.md`
+- **适配 React SPA 画布时，平台权威写函数通常可从 fiber 的 `memoizedProps` 找到**（如 `onNodeDataPatch`），但调用时 `allowFields` 参数必须显式传，否则平台默认字段白名单会过滤目标字段（静默无效）；且这类函数只拦 UI 入口、不拦数据写入，可绕过平台的 UI 锁定。详见 `references/react-spa-extension-adaptation.md`
 - manifest.json 中 `host_permissions` 必须包含目标站点的完整域名
 - Shadow DOM 的 `mode: "closed"` 防止页面 JS 访问扩展 UI 内部
 - **禁止在 bridge.js 中劫持全局构造函数（Proxy、Promise、Array 等）**——bridge.js 在 `document_start` 运行于 MAIN world，任何对 `window.Proxy` 的修改会影响页面自己的 JS bundle（如 Vue 3 的响应式系统），导致 SPA 白屏/初始化失败。此类 patch 需在独立测试扩展中验证，绝不能直接改现有的生产 bridge.js。

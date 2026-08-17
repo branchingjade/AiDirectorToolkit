@@ -1,7 +1,7 @@
 ---
 name: feishu-outage-recovery
 description: "Use when 飞书不回消息/宕机/API挂掉: 查gateway→重启→拉停机窗口消息→批量补回复。"
-version: 1.1.0
+version: 1.2.0
 tags: [feishu, gateway, outage, recovery, troubleshooting]
 ---
 
@@ -82,6 +82,7 @@ lark-cli im +messages-send --chat-id "<oc_xxx>" --as bot --text "回复内容"
 - 先道歉说明：`抱歉！刚才系统宕机了（10:56-14:18），你的消息没及时回复，现已恢复。`
 - 再针对消息内容回应：创作类任务（分镜/剧本/提示词）→「你发的 XX 我看到了，重新发我一次，我马上处理」；问答类 → 直接回答。
 - 注意：gateway 恢复后部分消息可能已被正常处理（重连后的新消息照常回复），补回复作为宕机说明补充，不冲突。
+- **⚠️ 重放陷阱（2026-08-07 叶子案例）**：gateway 重启/重连后，飞书会**补推（重放）宕机窗口期的旧消息**——这些重放消息会被当新消息处理并回复，造成「旧消息在恢复后数小时又收到一次成品」。叶子案例：11:43/11:51/14:00 的旧消息在 15:05/18:48/18:56/18:57 被重放，bot 回了 2-3 次重复成品，且补推的 message_id 与飞书历史旧消息 id 完全相同。**识别法**：gateway.log 的 inbound message_id 若与 `+chat-messages-list` 拉到的历史消息 id 一致 = 重放，非新消息。**处理**：这是飞书端行为，无需修代码；人工补回复前先确认哪些窗口消息已被重放处理掉，避免和自动重放撞车重复回复。
 
 ## 五、验证送达
 
@@ -112,9 +113,11 @@ lark-cli im +chat-messages-list --chat-id "<oc_xxx>" --as bot --order desc --pag
 | `+messages-search` missing_scope | 缺 `search:message` scope | 不用它，逐个会话拉 |
 | `hermes gateway status` 触发 pip 恢复且报 cryptography 拒绝访问 | update 中断 + 文件被占用 | 忽略，gateway 照常启动；彻底修复需关 Hermes 后手动 pip |
 | 恢复后无人回复「你死了吗」 | 停机窗口消息未补推，用户以为被无视 | 拉消息 → 补回复道歉 |
-| watchdog 标记文件每 ~30min 一条「进程不存在」，但 gateway 实际正常 | 计划任务环境下 `Get-CimInstance` 读不到其他进程的 CommandLine（权限/会话隔离），按命令行匹配必然返回空 → 误判宕机拉起 | 检测判据改为：①端口 8644 LISTENING（netstat 主判据，不依赖 CommandLine 权限）②日志 <10min 新鲜（覆盖重启窗口期）③命令行匹配兜底。注意 netstat 中文系统输出 GBK，subprocess 要 `errors="replace"` |
-| 修完误报后遗留 15 条假宕机记录 | 标记文件 outages 历史是脏数据 | 清空 `gateway_outage.json` 的 `outages` 列表，`last_outage_reason` 注明已修复 |
-| 重建 watchdog 计划任务后又不检测了 | schtasks /create 默认 RunLevel=LeastPrivilege，非管理员下 WMI 读不到 CommandLine | 用 XML 注册并设 `<RunLevel>HighestAvailable</RunLevel>`（`schtasks /create /tn ... /xml task.xml /f`），验证：`[xml]$x=schtasks /query /tn "Hermes_Gateway_Watchdog" /xml \| Out-String; $x.Task.Principals.Principal.RunLevel` 返回 HighestAvailable |
+| watchdog 标记文件每 ~30min 一条「进程不存在」，但 gateway 实际正常 | 计划任务环境下 `Get-CimInstance` 读不到其他进程的 CommandLine（权限/会话隔离），按命令行匹配必然返回空 → 误判宕机拉起 | 检测判据改为：①端口 8644 LISTENING（netstat 主判据，不依赖 CommandLine 权限）②日志 <10min 新鲜（覆盖重启窗口期）③命令行匹配兜底。注意 netstat 中文系统输出 GBK，subprocess 要 errors="replace" |
+| 空闲期误杀健康进程：标记文件出现「日志 N 分钟未更新（疑似卡死）」+ restart_attempted，但 gateway 实际健康（2026-08-08 实证，08-07 23:30 与 08-08 10:50 两次） | 原判定「进程存活 AND 日志<10min 新鲜」才健康——**gateway 空闲时（无消息）gateway.log 不更新**（housekeeping 不写日志），停更超 10 分钟即被误判卡死 → 杀健康进程重启 | 卡死判据改用 `state/gateway.heartbeat`（gateway/run.py loop_heartbeat_forever，event-loop 存活信号，每 30s 重写，**冻结即停**）——健康判定改为「进程/端口在 AND（日志新鲜 OR 心跳新鲜）」，任一新鲜即健康。验证法：`touch -d "20 minutes ago" gateway.log` 后跑 watchdog 应判健康，测完恢复 mtime。`--status` 输出含 heartbeat_stale_s 字段 |
+| 恢复后旧消息又收到重复回复 | 飞书补推（重放）宕机窗口期旧消息，gateway 当新消息处理 | 识别：inbound message_id 与历史消息 id 相同 = 重放；属飞书端行为无需修代码，人工补回复前先确认哪些已被重放处理 |
+| 重建 watchdog 计划任务后又不检测了 | schtasks /create 默认 RunLevel=LeastPrivilege，非管理员下 WMI 读不到 CommandLine | 用 XML 注册并设 `<RunLevel>HighestAvailable</RunLevel>`（`schtasks /create /tn ... /xml task.xml /f`），验证：`[xml]$x=schtasks /query /tn "Hermes_Gateway_Watchdog" /xml | Out-String; $x.Task.Principals.Principal.RunLevel` 返回 HighestAvailable |
+| watchdog 任务存在但 LastRunTime 停在创建后 ~22h、NextRunTime 为空（2026-08-10 实证：任务 08-07 15:25 创建，08-08 13:17 后失效 2 天无人察觉） | 触发器 Repetition 的 Duration 默认只有 21h52m 且 StopAtDurationEnd=True——重复窗口到期后不再触发 | 重建任务时显式设无限 Duration。⚠️ `<Duration>PT0S</Duration>` 会被 Register-ScheduledTask 拒绝（HRESULT 0x80041318，老版 Task Scheduler 不认 0=无限），用 `P3650D` 等效无限。修复流程：`Export-ScheduledTask` 导出 XML → replace Duration → `Register-ScheduledTask -Xml $xml -TaskName ... -Force -ErrorAction Stop`。注意文件里 replace 目标可能已被前次写坏（PT0S），先查再改。验证：`Get-ScheduledTaskInfo` 的 NextRunTime 有值 + `Start-ScheduledTask` 实测一次 LastTaskResult=0 |
 
 ## 前置条件
 

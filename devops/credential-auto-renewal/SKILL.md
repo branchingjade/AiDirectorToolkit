@@ -29,10 +29,10 @@ lark-cli 在执行任何 user 身份 API 调用时，如果发现 access token �
 ### 触发续期的最简命令
 
 ```bash
-lark-cli whoami
+lark-cli im +chat-list --as user --page-limit 1
 ```
 
-`whoami` 是极轻量的只读操作，不需要额外 scope。它足以触发 lark-cli 内部的 token 刷新。
+⚠️ **2026-08-13 实测坑：`lark-cli whoami` 不触发刷新**（v1.0.82）。whoami 走本地缓存读取身份，tokenStatus 保持 needs_refresh 不变。必须用**真实 user API 调用**（如 `im +chat-list --as user --page-limit 1`，无额外 scope 要求）才会触发 refresh token 使用并延长有效期。实测：续期后 access token 从已过期→valid，refresh token 到期从 08-15 延长到 08-20（+5 天）。验证方式：`lark-cli auth status` 里 tokenStatus 变 valid、refreshExpiresAt 变新日期。
 
 ### 检测脚本
 
@@ -51,7 +51,7 @@ lark-cli whoami
    - 如果输出包含 ✅（正常）→ 不发送任何消息，直接结束
    - 如果输出包含 ⚠️（即将过期或已过期）→ 继续步骤3
 3. ⚠️ 情况下的自动续期尝试：
-   - 执行 lark-cli whoami（触发 refresh token 使用，延长有效期）
+   - 执行 lark-cli im +chat-list --as user --page-limit 1（触发 refresh token 使用，延长有效期；⚠️ whoami 走本地缓存不触发刷新）
    - 如果成功 → 报告"Token 已自动续期成功 ✅"
    - 如果失败 → 提醒用户执行：lark-cli auth login --domain all --no-wait
 4. 最终回复就是状态消息正文，正常时回复"正常"即可。
@@ -59,7 +59,9 @@ lark-cli whoami
 
 ### 陷阱
 
-- **检查不修陷阱**：只跑 `lark-cli auth status` 读取状态不会触发 refresh token 使用，token 照样过期。必须再跑一个真正调用飞书 API 的命令（如 `lark-cli whoami`）。这是最容易踩的坑——检查脚本输出"✅ 正常"，用户收到"正常"报告就放心了，实际上 token 从未被使用、从未被续期，等到 refresh token 本身过期才发现问题。
+- **检查不修陷阱**：只跑 `lark-cli auth status` 读取状态不会触发 refresh token 使用，token 照样过期。必须再跑一个真正调用飞书 API 的命令（如 `lark-cli im +chat-list --as user`）。这是最容易踩的坑——检查脚本输出"✅ 正常"，用户收到"正常"报告就放心了，实际上 token 从未被使用、从未被续期，等到 refresh token 本身过期才发现问题。
+- **whoami 不触发刷新**：`lark-cli whoami` 走本地缓存，不算真实 API 调用。触发刷新必须用会真正打到飞书 API 的命令（`im +chat-list --as user` / `auth status` 后的任意 user 操作）。2026-08-13 实测确认。
+- **Windows 下 Python 子进程调 lark-cli**：lark-cli 是 shell 包装脚本（`#!/bin/sh`），Python `subprocess.run(["lark-cli", ...])` 会报 WinError 193（不是有效 Win32 程序）。必须调真实入口：`node.exe node_modules/@larksuite/cli/scripts/run.js <args>`（node 与 run.js 都在 `~/AppData/Local/hermes/node/` 下）。check-lark-auth.py 已内置该逻辑。
 - **refresh token 过期**：一旦 refresh token 本身过期，自动续期就失效了，只能重新走完整 OAuth 授权流程。所以 cron job 的频率要高于 refresh token 的有效期（推荐每天一次）。
 - **验证数据**：实测 `lark-cli whoami` 触发续期后，refresh token 到期从 2026-07-24 延长到 2026-07-30（+6 天），证明只要实际使用 token 就会自动延长有效期。
 - **cron 子进程环境**：lark-cli 的 auth 状态存在用户 home 目录下，cron 子进程能读到（如果是同一个用户运行的）。

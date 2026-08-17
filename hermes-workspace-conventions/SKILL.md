@@ -253,6 +253,17 @@ scope = 影响范围（日志|图谱|知识库|规范|自检|飞书|犬子无双
 
 判定口诀：跨项目的环境事实+用户偏好 → MEMORY/USER；项目专属约定 → 项目 .hermes.md/AGENTS.md；程序性知识 → skill；历史对话 → session_search。
 
+### Obsidian 知识库的 agent 可用通道（知识库 skill 化，2026-08-10 前端设计库确立）
+
+**Obsidian 是给人查的，agent 不会自动读**——建在 Obsidian 的知识库对 agent 是死资产（用户标准：0 次加载 = 引用缺失，不是资产冗余）。要让领域知识在真实工作中被用上，必须走 skill 通道，四步：
+
+1. **知识库 skill 化（土壤层）**：SKILL.md 正文 = 速查表（浓缩规则 + 权威出处，秒级可抄）；references/ = 详版文档（**agent 正本**）
+2. **description 带触发词**：触发词（设计网页/改UI/组件/布局/表单/动效…）写进 description 前 57 字符——系统 skill 索引注入时可见，agent 按任务相关性主动加载
+3. **流程 skill 加强制引用钩子**：主管该领域的流程 skill 加「阶段 0 查库」步骤（如 frontend-design-workflow 五阶段开头必加载 `前端设计知识库`；与妖玉影视「写戏前查知识库」同逻辑）
+4. **正本唯一 + 镜像标注**：skill references/ = agent 正本；Obsidian 分区 = 人读归档镜像，分区 MOC 顶部标注「正本在 skill，改文档 → 改 skill 正本 → 同步 Obsidian」——不出现两份漂移
+
+案例：2026-08-10 `前端设计知识库`（creative/ 分类，正文 7 张速查表 + references/ 9 份详版，前端设计工作流阶段 0 钩子）。验证：skill_view 加载后 linked_files 列出全部 references 才算通。
+
 ### 项目记忆 = session_search，不是自建层（2026-08-06 用户纠正）
 
 **用户原话**："你不是说 hermes 有项目记忆这层吗，怎么全要我自己搞"。教训：**Hermes 内置的"项目记忆"就是 session_search——所有会话（桌面+飞书+评论）自动存档、永久可查、零维护**。用户要"自动记住项目细节进度"时，答案指向内置能力（session_search 搜项目名），**不是**去建"项目记忆.md"、台账、cron 盘点这类自建层——那是 agent 一厢情愿的过度设计，会让用户觉得"全要自己搞"。
@@ -324,6 +335,22 @@ venv/Scripts/python.exe -m pip install --force-reinstall charset-normalizer
 
 ⚠️ **第三实例（2026-08-09）**：`Hermes_Gateway_Watchdog`（每 5 分钟跑 gateway_watchdog.py）当初直接用 `python.exe` 作为 Execute——python.exe 自带控制台窗口，任务每次触发就闪一个黑窗，用户问「总有一闪而过的窗口是不是 hindsight」（hindsight 守卫正常，排除）。排查法：`Get-ScheduledTask | Where-Object {$_.TaskName -match 'Hermes'}` + `Triggers.Repetition.Interval` 看触发频率（PT5M 即每 5 分钟），`Actions.Execute` 看是否 python.exe。修复：`Set-ScheduledTask -Action (New-ScheduledTaskAction -Execute <pythonw全路径> -Argument ...)`，验证 `Start-ScheduledTask` 后 `Get-ScheduledTaskInfo` 的 `LastTaskResult=0`。**凡计划任务跑 .py 脚本，Execute 一律直接 pythonw.exe，不用 python.exe 也不包 cmd /c。**
 
+⚠️ **第六实例（2026-08-09，终局定案）**：**venv\Scripts\pythonw.exe 是 console stub（内部 exec 控制台版 python.exe）——不是真 GUI 子系统，用它启动的任何进程都会 AllocConsole 弹黑窗**（实证：守卫脚本自己用 venv pythonw 启动时弹窗被高频监控抓到，标题「...venv\Scripts\pythonw.exe」）。**真无窗口 = `.hermes-runtime\python\generation-*\cpython-*\pythonw.exe`（真 GUI 子系统）**。统一修复：所有后台 python 启动一律切 runtime pythonw——Hermes_Gateway_Watchdog / Hermes-HideHindsightWindow / HermesRemoteServe 三计划任务 Execute（`Set-ScheduledTask -Action (New-ScheduledTaskAction -Execute <runtime_pyw> -Argument ...)`，保留原 Arguments/WorkingDirectory）+ Hermes_Gateway.cmd/.vbs + serve_remote.cmd + ops-panel/service.py `_VENV_PYTHONW`。验证：重启守卫/watchdog 后 EnumWindows 可见 ConsoleWindowClass == 0（守卫自己不再弹）。弹窗排查方法论与高频监控脚本见 `scripts/window-flash-capture.py` + `references/transient-window-debugging.md`。守卫正则 `hermes-agent\\\\.*?pythonw?\\.exe` 保留作 AllocConsole 兜底。
+
+⚠️ **第七实例（2026-08-10，第六实例的修正）——runtime pythonw 硬编码 = update 后全断**：第六实例切到的 runtime 路径含 generation 哈希（`generation-<hash>`），**hermes update 重建该目录后哈希必变，所有硬编码引用全部失效**（watchdog 起不来→gateway 没人管、守卫失效→弹窗复发、serve 断线）。08-10 09:16 update 实锤：gateway-service 的 .cmd/.vbs 被官方重建回 venv python.exe 版（08-09 手改的 runtime 版被覆盖）。**官方正解（gateway_windows.py `_resolve_detached_python` 注释，commit aa2ae36c3f 后）**：不用 runtime 真 pythonw（GUI 无控制台 → 每个 console 后代 spawn 都闪窗 #54220/#56747），用 **venv 的 console python.exe + 隐藏控制台机制**（CREATE_NO_WINDOW / wscript Run style 0）——venv 路径稳定不随 update 变，且它是 re-exec 垫片自动跟随最新 runtime；单个隐藏控制台被后代继承不闪窗。**终局方案（2026-08-10 落地，实测全过）**：
+- 守卫/watchdog（纯标准库脚本）→ 计划任务 Execute = **系统 Python312 pythonw.exe**（`C:\Users\HMSJ\AppData\Local\Programs\Python\Python312\pythonw.exe`，GUI 子系统，永久稳定）
+- 远程 serve → 计划任务 Execute = **wscript.exe + serve_remote.vbs**（官方同款：内部 venv python.exe + Run style 0，垫片自动跟随 runtime）
+- ops-panel `_VENV_PYTHONW` → **动态解析**最新 generation 真 GUI pythonw（PE subsystem==2 校验），不硬编码
+- gateway-service .cmd/.vbs → **不动**（官方 update 重建为 venv python.exe 版，本就稳定）
+- 兜底：`scripts/fix-runtime-paths.py --fix`（幂等，重指 3 任务 + 检查脚本引用），挂 gateway_watchdog.py main() 开头每次自愈
+铁律：**后台 python 启动三选一——系统 pythonw（纯标准库脚本）/ venv python.exe+隐藏控制台（需要 hermes 包）/ 动态解析 runtime（无法避免时），绝不硬编码 generation 路径**。
+
+**根因修正（官方源码注释，gateway_windows.py:725-745，2026-08-09 自检发现）**：真正的坑是 `DETACHED_PROCESS | CREATE_NO_WINDOW` 组合——**MSDN 规定 DETACHED_PROCESS 在场时 CREATE_NO_WINDOW 被忽略**（hide bit 是死的，不是无效）；单独 `CREATE_NO_WINDOW` + venv python.exe re-exec 实测 windowless（子进程继承 shim 隐藏控制台）。官方同款根治：GUI-subsystem pythonw daemon 无控制台（commit aa2ae36c3f）。用法铁律：**后台 spawn 要么 pythonw.exe，要么单独 CREATE_NO_WINDOW，绝不 DETACHED_PROCESS 与 CREATE_NO_WINDOW 混用**。
+
+⚠️ **第四坑（2026-08-09 排查中）——守卫 MARKER 路径漂移**：hindsight daemon 实际跑在 `.hermes-runtime\python\generation-<hash>\...\pythonw.exe`（由 serve 进程派生，`--idle-timeout 300` = 空闲 5 分钟自动退出、需要时再拉起），而守卫脚本 `hide_hindsight_window.py` 的 MARKER 是 `hermes-agent\venv\Scripts\pythonw.exe`——**匹配不到**。daemon 每次拉起时 pythonw 内部 AllocConsole 弹窗，守卫藏不住 = 周期性"一闪而过"窗口（最大嫌疑，实锤待窗口监控）。修法方向：MARKER 泛化为「标题含 pythonw.exe 且类名 ConsoleWindowClass 即隐藏」（未验证，待下次会话落地）。**守卫脚本的路径匹配必须与进程实际路径一致——路径迁移（venv → .hermes-runtime）后守卫静默失效**。排查弹窗完整方法论见 `references/transient-window-debugging.md`。
+
+⚠️ **ops-panel 更新执行器停机陷阱（2026-08-09 实测）**：桌面 app 触发一键更新（含 dryrun 演练）时，`Documents\Hermes\scripts\ops-update-runner.py` 以 detached 方式启动，**先停全部服务**（gateway/watchdog/remote-serve/guard——`state/ops-panel-update.json` 的 `stopped` 字段为真，实测 gateway 8644 确实掉线），再等桌面 app 退出（最长 10 分钟）；**app 不退出则超时标 failed 直接退出，restore_services 不会执行 → gateway 保持停机（飞书断线）**。恢复（实测成功）：`Start-ScheduledTask Hermes_Gateway` → sleep 15 → `netstat` 验证 8644 LISTENING → gateway.log 无报错。dryrun 模式只模拟 8 秒不真更新，但**一样停服务**。完整流程/标记文件/日志位置见 `references/ops-panel-update-runner.md`。
+
 计划任务「登录时」交互运行 python.exe 会弹 cmd 窗口（如 `HermesRemoteServe` 远程网关）。完整三层坑与解法：
 
 **① cmd /c 壳弹窗**：任务动作包 `cmd /c ...` 时 cmd 本身是控制台程序，登录自启即显示窗口并常驻（serve 常驻则窗口不消失，标题「选择 C:\WINDOWS\system32\cmd.EXE」）。解法：任务动作直接 `pythonw.exe`（venv\Scripts\pythonw.exe 默认存在）+ 参数 + 起始于(WorkingDirectory)=运行目录，不用 cmd 壳。改任务：`Set-ScheduledTask -Action (New-ScheduledTaskAction -Execute <pythonw全路径> -Argument "..." -WorkingDirectory <dir>)`。
@@ -373,6 +400,18 @@ Hermes 终端以管理员权限运行时，`net use` / `Get-PSDrive` 看不到�
 
 **整文件 write_file 改写陷阱**：翻译/改写大文件时用 write_file 全量重写，极易把原内容原样写回（本会话连续 4 次写回英文原样，直到改用逐块 patch 才真正翻译）。正确姿势：① 用多次小 patch 逐示例块替换（每次 diff 可见实际变化）；② 替换后 grep 旧语言残留验证；③ 对比字节数变化确认真的改了（15,980→15,246 字节才算数）。
 
+### 规格变更时区分「当前约束」与「历史取证」（2026-08-17 Seedance 2.0→2.5 实测）
+
+平台规格变更（模型升级/时长上限/素材配额/格式反转）在 skill 家族里传播时，**不是所有旧值都该改**：
+
+1. **当前约束/参数 → 改**：SKILL.md 正文的硬上限/参数表/API 参数/黄金参数、依赖 skill 的约束章节、references 里的执行规范——这些是"现在要用什么"的权威
+2. **历史取证/来源记录 → 保留原文**：带 S 编号的来源引用（如制作层链路.md 的 S8/S16 引用行）、CHANGELOG 历史条目、实战回测文档（回测日期记录的是当时的事实）、论文/外链标题——改了反而失真（来源行里的旧版本号就是当时抓取的事实）
+3. **对必须保留的历史记录，需要时加 📌 更新注记**（标注日期+新事实+对旧结论的影响），不改写旧结论——回测缺口 G4 伪长镜方案即此法：保留原 15s 分析，加注"30s 上限开放后只需 1-2 段"
+
+**模型切换不只换 ID**：用户说"用新模型"时，要连带核对参数表——分辨率档位（2.5 仅 480p/720p，1080p/2K 作废）、素材上限（9图→30图/3视频→10视频/3音频→10音频）、时长范围（→4-30s）、生成模式（新增编辑/延长/首尾帧），并把新 API 的硬坑写进 skill（2.5 任务类型误判：prompt 含"编辑/延长/修改"等词触发异步报错）。
+
+验证：改完后 grep 旧值，**逐条确认残留属于"历史"而非"遗漏"**——把残留分成"该改的已全改"+"保留的都有理由"两类汇报，而不是笼统说"还有 N 处旧的"。
+
 ### Gateway 安全重启（避免 hermes CLI 触发 update 恢复，2026-08-08 实测）
 
 修改飞书源码补丁（feishu_comment.py / gateway/run.py / collab.py）后必须重启 gateway 才生效。**不要用 `hermes gateway status/start` CLI 重启**——记忆记载这些命令可能触发 update 恢复流程连带停 gateway（cryptography 损坏期间）。安全路径：
@@ -407,7 +446,7 @@ tail -5 ~/AppData/Local/hermes/logs/gateway.log              # 无报错
 5. **并行会话仓库只推自己的单文件 → 用隔离临时分支，别 rebase/merge**（2026-08-07 实测：skills 正本仓库远端有并行会话大批量提交如知识库 v1.18.0 30 子代理，本地 master 还残留并行会话未推送提交。此时 `git pull --rebase` / `git merge` 必然撞冲突，且冲突文件全是别人的活，解了就是污染别人的提交）。正确姿势：
    - `git stash push -u -m "收尾临时stash-并行会话改动"`（先保护并行会话的未提交改动，否则 checkout 被拒）
    - `git checkout -b tmp-push-<名> origin/master`（基于远端最新建临时分支，不碰本地 master）
-   - `cp` 自己的文件到临时分支 → `git add` + `git commit`
+   - 取自己的文件到临时分支：`git checkout master -- <自己的文件/目录>`（比 `cp` 干净——保留 git 追踪且一步到位；文件已在本地 commit 过则 checkout 自 master 即得，未 commit 的内容要先 commit 或手工重建）→ `git add` + `git commit`
    - `git push origin tmp-push-<名>:master`（fast-forward，远端无分叉才推得动）
    - `git checkout master` → `git branch -D tmp-push-<名>` → `git stash pop` 还原并行会话改动
    - 验证：`git fetch origin && git show origin/master:<路径>` 确认远端到位（CRLF 差异属正常，diff 只看内容）
@@ -421,6 +460,18 @@ tail -5 ~/AppData/Local/hermes/logs/gateway.log              # 无报错
 ### 并行 terminal 调用共享 shell 状态
 
 并行发多个 terminal 调用时共享同一 shell 会话——一个调用里的 `cd` 会干扰另一个的 cwd，造成 `fatal: not a git repository`、目录"找不到"等费解报错（实际文件都在，只是 cwd 漂了）。规避：并行 terminal 调用一律显式传 `workdir` 参数，不依赖共享 cwd。反面案例：整理工作区时并行跑两个 ls/git 命令，一个 `cd branchingjade` 后 cwd 漂到上级目录，另一个报 git 仓库和 `分析/` 目录不存在。
+
+### 目录清理白名单陷阱：untracked 正式工具被误删（2026-08-12 实测）
+
+清理 scripts/ 等目录时，**手写 KEEP 白名单会漏掉「untracked 但仍是正式工具」的文件**——它们没进过 git（`git ls-files` 查不到）、也没被 cron/计划任务直接引用，但可能是记忆/skill 里标注的保留工具（弹窗排障工具 pspopup_monitor.py/wmi_powershell_watcher.py、迁移工具链 jianying2davinci.bat/relink_all_episodes.py/scan_compounds.py 曾全部被误删，靠当天备份 tar 找回）。
+
+清理前白名单核对四步（缺一不可）：
+1. `git ls-files <目录>` — tracked 文件是正式资产，默认保留
+2. `cronjob action=list` — cron prompt 里引用的脚本名（如 github_watch.py）
+3. `Get-ScheduledTask | Where-Object {$_.TaskName -match 'Hermes'}` + Actions — 计划任务引用的脚本（如 hide_hindsight_window.py / dashboard_remote.vbs）
+4. **grep 记忆与 skill 里点名的工具名**：`grep -rln "脚本名" ~/AppData/Local/hermes/skills/` — 记忆/skill 明确标注为「保留工具/排障工具」的文件即使 untracked 也在白名单（本会话漏的就是这一步）
+
+**根因修复（防复发）**：清理收尾时把全部正式工具 `git add` 纳入追踪——之后「git 追踪状态」就是唯一可靠的保留判据，不再依赖手写白名单。误删后的恢复方法（本地备份 tar 提取）见 hermes-backup skill「从本地备份 tar 恢复误删文件」。
 
 ### git mv 只对 tracked 文件有效
 
@@ -466,7 +517,21 @@ p.write_text(text)
 
 ### 记忆瘦身流程（skill 覆盖验证 → 删）
 
-用户会质疑"很多不都是在skill中的吗"——删记忆条目前先验证知识是否已在 skill 里：`grep -rl "关键词" ~/AppData/Local/hermes/skills --include=SKILL.md`，实测命中即覆盖（如 GIF 压缩坑被 gif-compression/gif-optimization 各命中 21/13 处 → 整条删）。删除优先级：① skill 已覆盖的程序知识 → 删；② 画像（USER.md）已覆盖 → 删（独有信息先并入画像再删）；③ 项目知识 → 搬进项目 AGENTS.md 后删；④ 易过时快照（版本号/文件数量）→ 改成"以 frontmatter/MOC 为准"。保留：无 skill 覆盖的环境事实、用户偏好、核心原则。批量操作用 memory operations 数组一次提交（原子、只查最终字符数）。
+用户会质疑"很多不都是在skill中的吗"——删记忆条目前先验证知识是否已在 skill 里：`grep -rl "关键词" ~/AppData/Local/hermes/skills --include=SKILL.md`，实测命中即覆盖（如 GIF 压缩坑被 gif-compression/gif-optimization 各命中 21/13 处 → 整条删）。删除优先级：① skill 已覆盖的程序知识 → 删；② 画像（USER.md）已覆盖 → 删（独有信息先并入画像再删）；③ 项目知识 → 搬进项目 AGENTS.md 后删；④ 易过时快照（版本号/文件数量）→ 改成"以 frontmatter/MOC 为准"。保留：无 skill 覆盖的环境事实、用户偏好、核心原则。批量操作用 memory operations 数组一次提交（原子、只查最终字符数）。**最优水位标准**（目标 ≤10,000 字符/触发清理线 12,000/config `memory_char_limit`=16,000/下限警惕 6,000）+ **「注入 vs 检索」原理**（Hindsight 是 recall 检索层、MEMORY 是每会话注入层——铁律不能赌检索概率）→ 详见 `references/memory-cleanup-methodology.md`「2026-08-10 记录」。
+
+### 画像（USER.md）分类边界：只存「谁、怎么沟通、通用做事方式」（2026-08-17 用户三次纠正定稿）
+
+User Profile 是**徐学环本人的画像**，不是所有偏好的收纳箱。用户逐条纠正三次（音乐→「那不是文皓的会话吗」、电影创作偏好→「这是项目专属的吧」、21:9→「也是项目的啊」）后定稿的边界：
+
+**留画像**：身份（影视从业者）、沟通（简洁/证据来源/中文/命名全称/大白话/做事快/升级汇报只挑高价值项）、通用做事方式（发明非选择/根因思维/规则关烂提问开好/备份取舍/文件处理不覆盖源文件/实测验证/主工作区工作流/Docker 部署/主动挑逻辑漏洞暴露决策点）。
+
+**清出画像**（按去向分类，清理后实测 3989→786 字符）：
+- 项目/题材创作规则（国风美学/一波三折/暗线/主题落点和解/架空时代/21:9/推进节奏）→ **Obsidian 项目文档**——是项目拍板不是全局偏好
+- 工作方法/评估标准（设定被否根因排查/创作评估/AI感判定/分镜输出格式/交互铁律）→ **memory 或已有 skill**——删除前先 grep skill 确认覆盖（多数 memory 已有更全版）
+- 格式/流程规范（剧本格式/交付物三分离/文献标准）→ **skill/memory**
+- 其他成员偏好（施文皓歌词方法论/Suno 人声）→ **Obsidian 成员画像/<成员名>.md** 正本，不进全局任何层（含 memory——飞书协作数据留 Obsidian 铁律）
+
+**判别口诀**：问「这是'你是谁'还是'某个项目怎么拍'？」——创作/题材/项目规则默认属于项目或题材层，**不要自作主张当通用偏好留在画像**；成员专属偏好默认去成员画像。清理操作走 memory 工具 operations 数组一次提交（原子），画像清理到 ~800 字符水位即止。
 
 ### Skill 同步铁律
 
@@ -537,4 +602,8 @@ p.write_text(text)
 | `scripts/knowledge-usage.py` | **知识库使用率统计脚本** — 从 state.db 统计 skill_view 实际加载了哪些知识库文件（主本/文件/僵尸资产三块输出；数据源坑：过滤用知识库名不用 'skill_view'，file 字段非 file_path）。挂接知识库每日巡检 cron 步骤6（2026-08-08） |
 | `scripts/archive-consistency.py` | **归档一致性检查脚本** — 四项校验：MEMORY/USER 镜像 vs 真源 diff、剧本库 MOC 计数 vs 磁盘、看板日报新鲜度（>3天）、成员名单↔画像 open_id 对应。挂接知识库每日巡检 cron 步骤7（2026-08-08）。设计：检查为主不自动改 MOC（计数不符需人判断） |
 | `references/kb-synthesis-workflow.md` | **从存量知识库合成新文档工作流** — 模板先行/grep 关键词簇提取（不全文读）/逐条引用/【推断】诚实声明/中文体积预算/多轮 patch 后复读（2026-08-08《声音设计密码》实例：13 份素材 434KB→23KB 成文） |
+| `references/knowledge-base-agent-usage.md` | **知识库 → agent 可用验证方法论** — 三层落地（土壤 skill 速查/流程 skill 阶段 0 钩子/同级 skill 显式路由）的**验证三法**：skills_list 索引可见性、delegate_task 子代理读 live transcript 看 skill_view 调用链（子代理自报不可信）、usage.json last_used_at 长期监控；同类 skill 干扰判据=同层多副本才是重复（2026-08-10 前端设计知识库实测，11 次 skill_view 链路 + impeccable 11 个缺失 reference 发现） |
+| `references/transient-window-debugging.md` | **一闪而过窗口排查方法论** — 弹窗源清单（计划任务 python.exe / pythonw AllocConsole / 守卫 MARKER 路径漂移 / ops-update-runner / 系统 hpatchmonTask）+ 排查命令链（计划任务枚举/进程树/事件日志断路/EnumWindows 抓现行）+ bash+PowerShell 转义地狱解法（2026-08-09 实测） |
+| `references/ops-panel-update-runner.md` | **ops-panel 更新执行器停机陷阱** — 触发即停全部服务、app 不退出则超时 failed 且不恢复（gateway 保持停机）；dryrun 也停服务；恢复流程 Start-ScheduledTask Hermes_Gateway + 8644 验证（2026-08-09 实测） |
+| `scripts/window-flash-capture.py` | **弹窗抓现行高频监控** — 0.05s 轮询 EnumWindows，记录 ConsoleWindowClass/python/cmd 窗口 NEW/TITLE-CHANGE/GONE（PID/标题/存活时长），配合 transient-window-debugging.md 排查链；用法 `<python> window-flash-capture.py [日志] [秒数]`（2026-08-09 实证） |
 | `scripts/cleanup-projects.py` | 项目清理脚本 |

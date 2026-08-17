@@ -135,6 +135,27 @@ with opener.open(req, timeout=30) as resp: ...
 
 批量导入：`POST /api/item/addFromPaths`，body `{"paths": [绝对路径...], "folderId": "..."}`，返回新素材 ID 列表。导入后逐条 `/api/item/info?id=...` 验证 name/ext/width/height/size。中文路径用 `ensure_ascii=False` 序列化 JSON。
 
+### 4b. URL 远程导入（Eagle 4.0 关键坑，2026-08-12 实测）
+
+**端点：`POST /api/item/addFromURL`**（`createFromURL`/`createFromPath` 在 4.0 已 404 废弃；`addFromPath` 400 参数不明不可靠）。
+
+```js
+// 浏览器前端直连（Access-Control-Allow-Origin: * 已开放）
+fetch('http://localhost:41595/api/item/addFromURL', {
+  method:'POST', headers:{'Content-Type':'text/plain'},  // 必须 text/plain！
+  body: JSON.stringify({url:'http://192.168.1.2:8000/audio/114?download=1', name:'素材名', website:'来源', tags:['豆包TTS']})
+})
+```
+
+四个坑（全部实测）：
+
+1. **POST 必须 `Content-Type: text/plain`**——JSON content-type 会触发 CORS preflight（OPTIONS），Eagle **不响应 OPTIONS**（返回 404）→ 浏览器 `Failed to fetch`。text/plain 是简单请求，直接通过。服务端 curl 用 application/json 可以（无 CORS 参与），浏览器必须 text/plain。
+2. **假成功**：下载 404 的 URL 也返回 `{"status":"success"}`——调试时必须用真实存在的 URL，导入后去 `item/list` 验证是否真入库，不能信响应。
+3. **name/annotation/tags 参数不可靠**——Eagle 可能改写名称（115_xxx.wav 导入后显示为「铁门」），tags 可能不落。别依赖这些参数做查重。
+4. **重复文件弹窗**：重复导入同文件时 Eagle UI 会弹窗（服务器端静默 success）。要「默认使用已存在文件不弹窗」，发送前查重：`GET /api/item/list?limit=5000` 拉全量，按 `item.size === 素材 size` 匹配（size 是可靠指纹，同素材必然命中），命中则跳过导入。
+
+
+
 ### 5. 文件夹树缓存延迟
 
 `/api/folder/list` 返回的 `children` 可能不反映最近变更。始终用 `item/list?folders=<ID>` 验证。

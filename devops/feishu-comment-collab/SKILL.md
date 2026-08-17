@@ -18,14 +18,16 @@ tags: [feishu, comment, collab, kanban, obsidian, gateway]
   → feishu_comment.py       # 主流程：过滤/权限/时间线/prompt/投递
   → feishu_comment_rules.py # 访问控制规则解析（独立 leaf 模块）
   → feishu_comment_collab.py# 协作层：成员/路由/画像/项目上下文/会话持久化
-  → tools/feishu_comment_kanban_tools.py    # kanban 4 工具
-  → tools/feishu_comment_obsidian_tools.py  # Obsidian 2 工具
+  → tools/feishu_doc_tool.py                 # 读 + 编辑：read/fetch_blocks/str_replace/block_replace
+  → tools/feishu_comment_kanban_tools.py     # kanban 4 工具
+  → tools/feishu_comment_obsidian_tools.py   # Obsidian 2 工具
 ```
 
 关键点：
 - **事件入口已在 adapter.py 订阅**，不需要开发者后台额外配事件（WebSocket 模式自动收）
 - 过滤条件：self-reply 跳过、`to_open_id` 必须是 bot（评论里 @ bot 才有）、notice_type ∈ {add_comment, add_reply}
 - agent 配置：`skip_context_files=True`；`skip_memory` 按角色——admin 加载全局记忆、member 隔离；toolsets = feishu_doc + feishu_drive + feishu_comment
+- **2026-08-13 起评论 agent 可改文档正文**（此前只能读+评论）——见「文档编辑」章节
 
 ## 访问控制（最常见排障点）
 
@@ -72,10 +74,29 @@ cd ~/AppData/Local/hermes/hermes-agent
 - **权限分级**：admin（妖玉）全量（记忆开关开、能派任务）；member 只读+认领（记忆隔离）
 - **指令直答**：评论含"评论状态/会话状态/协作状态"→ 不跑 agent，直接回状态报告
 
-## 工具集（feishu_comment toolset，6 个）
+## 文档编辑（2026-08-13 新增，两轮确认流）
+
+评论 agent 的工具箱从「读+评论」升级为「读+评论+改正文」。**用户拍板方案 C：强制两轮确认，改前列清单等回复确认才动手**。
+
+工具（tools/feishu_doc_tool.py，注册在 feishu_doc toolset，共 4 个）：
+- `feishu_doc_read` — 纯文本读
+- `feishu_doc_fetch_blocks` — 带 block_id 的 XML 读（定位/验证用）
+- `feishu_doc_str_replace` — 全文精确替换（pattern 必须逐字复制自原文）
+- `feishu_doc_block_replace` — 按 block_id 替换单块
+
+**确认流（已写进 `_COMMON_INSTRUCTIONS`，不可跳过）**：
+1. 用户要求改正文 → 先 fetch 定位/数次数 → 回复**编号改动清单**（位置/原文→新文/总数）→ **不动手**
+2. 等用户显式确认（"确认/可以/改吧/就这么改/OK/好"）→ 才执行编辑 → 再 fetch 验证 → 回复结果
+- 会话历史（session_key 跨卡片记忆）承载清单，第二轮靠 history 识别确认——两轮是跨评论完成的
+- 编辑安全规则：pattern 逐字复制（差一字=静默 no-op）；空 content 删除需显式 `allow_empty=true`（工具层护栏，防误删全部匹配）；block_replace 后旧 ID 失效需重新 fetch；每次改动后必须 fetch 验证才报成功
+
+**排障新姿势**：评论 agent 回复「我没有改正文的工具/接口」≠ 权限问题——先查工具集（`toolsets.py` 的 feishu_doc toolset 有没有写工具）再查权限。2026-08-13 实测：agent 说"只有读和评论两类接口"是工具集没挂写工具，权限层（tenant_editable）完全够。权限诊断三步法见 feishu-doc-maintenance §四·五。
+
+## 工具集（feishu_comment toolset + feishu_doc toolset，8 个）
 
 - kanban：create（**仅 admin**，中文负责人名自动解析）/ list / claim / complete
 - Obsidian：search / read（**权限分级**，见 references/obsidian-note-tools.md）
+- 文档：read / fetch_blocks / str_replace / block_replace（见上方「文档编辑」章节）
 
 工具身份通过 thread-local 传递：`collab.set_commenter(open_id)` + `set_project(project)`（feishu_comment.py 在 agent 运行前设置，handler 读取做角色校验）。
 
@@ -85,7 +106,7 @@ cd ~/AppData/Local/hermes/hermes-agent
 - **kanban 中文 board 名直接报错**：slug 只允许小写英文数字连字符下划线，中文项目用拼音 slug（伏妖记→fuyuji）+ `--name 中文`。评论 kanban 工具已做名字→slug 自动映射
 - **triage 任务认领断链**：`create_task(triage=True)` 落 triage 状态，`claim_task` 只接受 ready → 协作任务必须默认创建（落 ready）
 - **dispatcher 不会动人工任务**：kanban dispatcher 每 60s spawn ready 任务（`hermes -p <assignee>`），但 assignee 非真实 Hermes profile（如成员 open_id）的任务**永不自动 spawn**——人协作任务天然隔离，详见 references/kanban-collab.md
-- **`hermes update` 会覆盖所有源码改动**（feishu_comment*.py / toolsets.py / tools/*）——升级后需重打补丁
+- **`hermes update` 会覆盖所有源码改动**（feishu_comment*.py / toolsets.py / tools/*）——升级后需重打补丁。⚠️ 2026-08-13 实测：官方源码演进后**整体 `git apply` 会失败**（上下文对不上），正确姿势是 `git apply --3way hermes-local-patches.diff`（冲突文件留 `<<<<<<<` 标记，多为官方新版编码处理已比补丁强，保留 ours 手动解），再手动复制被删的新文件（正本在 Obsidian Vault/_hermes/补丁管理/，`cp` 到 plugins/platforms/feishu/ 和 tools/），最后 py_compile 语法验证 + 重启 gateway。症状识别：规则文件 policy=members 但日志 `denied (policy=pairing)`——`_VALID_POLICIES` 里没 members 被静默回退，**成员全部被拒**
 - **规则文件热加载 ≠ 代码热加载**：改 `feishu_comment_rules.py` 代码（如新增策略）必须重启 gateway；规则文件本身（JSON）不用
 
 ## 相关

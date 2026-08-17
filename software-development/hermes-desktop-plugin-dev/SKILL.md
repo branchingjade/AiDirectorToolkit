@@ -19,7 +19,34 @@ tags: [hermes, desktop, plugin, development]
 
 manifest.json 最小结构：`{"name": "<id>", "label": "...", "description": "...", "version": "1.0.0", "tab": {"hidden": true}, "api": "plugin_api.py"}`。
 
-**⚠️ 最关键的坑：后端 API 是 `hermes_cli/web_server.py` 启动时 `_mount_plugin_api_routes()`（模块级，~17284 行）挂载的。热重载只覆盖前端 plugin.js；新插件/后端代码改动必须重启桌面应用（完全退出 Hermes.exe 重开）才生效。重启 gateway 没用——插件 API 不在 gateway 进程里。** 判断已挂载：`netstat -ano | grep LISTENING` 找 python 监听端口，逐个 curl `/api/plugins/<id>/<path>`，200 即挂载成功（本机桌面后端曾在 38766 端口）。
+**⚠️ 最关键的坑：后端 API 是 `hermes_cli/web_server.py` 启动时 `_mount_plugin_api_routes()`（模块级，~17284 行）挂载的。热重载只覆盖前端 plugin.js；新插件/后端代码改动必须重启桌面应用（完全退出 Hermes.exe 重开）才生效。重启 gateway 没用——插件 API 不在 gateway 进程里。** 判断已挂载：看 `~/AppData/Local/hermes/logs/agent.log` 里 `Mounted plugin API routes: /api/plugins/<id>/` 行；**不要用裸 curl 探测 404**——见下方「API 404 = 鉴权门，不是故障」。
+
+### ⚠️ API 404 = 鉴权门，不是故障（2026-08-09 实测）
+
+`web_server.py` 的 `_plugin_api_runtime_gate`（~569 行）对未鉴权请求**故意返回 404**（防插件名枚举 oracle，注释明说 "an unauthenticated caller could fingerprint which plugins are installed/enabled by reading the status code"）。因此：
+
+- 裸 `curl http://127.0.0.1:<port>/api/plugins/<id>/sessions` 返回 404 **不代表插件坏了**——它可能挂载正常只是你没带 token。
+- 带鉴权重测：`X-Hermes-Session-Token: <token>` 或 `Authorization: Bearer <token>`。token 是 gateway 启动时从 `HERMES_DASHBOARD_SESSION_TOKEN` 环境变量取的（`_SESSION_TOKEN`，每次启动随机，死在进程里），auth_required=true 时不注入 SPA HTML（`window.__HERMES_SESSION_TOKEN__` 只在未开鉴权时注入）。
+- **可靠验证路径 = 跳过 HTTP 直接测业务**：`python -c "import sys; sys.path.insert(0,'<dashboard>'); from channel_sessions.service import list_sessions; list_sessions(limit=5)"` 真库真调用，测的是业务逻辑本身。HTTP 层只负责鉴权/路由，业务验证不需要它。
+- 结论：**404 先查鉴权，再查挂载日志（agent.log 的 Mounted 行），最后才怀疑代码**。
+
+### ⚠️ 插件 Tailwind 类必须存在于 Hermes 编译 CSS（2026-08-09 根因级教训）
+
+**Hermes 桌面 app 的 CSS 是 Tailwind v4 从 app 自身源码编译的；插件目录在构建图之外——插件 JS 里写的 className，只要 app 源码没用过，就没有对应 CSS，UI 静默破损（不报错）。** 本会话实锤：
+
+- `--ui-fill-tertiary` / `--ui-fill-secondary` **变量不存在**（app 用 `--ui-bg-*` 系列）→ 消息气泡/头像/hover 背景全透明 =「看不到会话内容」的视觉根因；
+- `text-[10.5px]` / `[12.5px]` / `[13px]`、`w-[380px]`、`max-w-24`、`min-h-[30px]`、`space-y-3.5`、`bg-x/50` `/60` 变体（app 只编译过 `/40`）全部缺失；
+- Codicon 图标名则相反：`codicon-<name>` 是字体类（codicon.css），**任何名字都能用**（如 `tag-add`/`checklist` 存在，`check-circle-filled` 不存在——照码有图标名的黑名单）。
+
+**纪律（写任何插件 className 后必做）**：对照 dist CSS 精确审计，脚本 `scripts/audit-tailwind-classes.py`（Tailwind 转义精确匹配：`[`→`\[`、`.`→`\.`、`(`→`\(`、`/`→`\/`，变体只取冒号后主体）。审计脚本放插件 tests/ 下并在 CI/selfcheck 里跑，防止回归。Hermes 内置可用变量速查（编译产物验证过）：`--ui-bg-tertiary`（hover/底）/`--ui-bg-secondary`、`--ui-text-primary/secondary/tertiary/quaternary`、`--ui-stroke-secondary`、`--ui-accent`、`--ui-control-active-background`、`--ui-red`、`text-destructive`（tailwind 语义色）。
+
+### ⚠️ 块注释 `*/` 提前闭合 = 整文件语法崩（2026-08-09 实测）
+
+版本注释里写 `--ui-fill-*/字号`（含 `*/`）会**提前终止 `/* */` 块注释**，后面的代码全部变成裸语法 → 整个插件加载失败。desktop.log 报 `SyntaxError` 但错误行号定位到注释行附近（stack 行号不可靠）。**检查法**：`grep -n '\*/' plugin.js` 应该只出现注释结尾处；版本注释里禁用 `*/` 组合（写成「--ui-fill 系」）。
+
+### 前端语法验证（Windows 实测可靠路径）
+
+`node --check` **只查语法不解析模块**——不用替换 import，直接 `cp plugin.js "$TEMP/chk.mjs" && node --check "$TEMP/chk.mjs"`（MSYS `/tmp` 会被 node 解析成 `C:\tmp` 报 MODULE_NOT_FOUND，用 Windows 临时目录）。**不要用 vm.Script + 手动替换 import**（stub 插错位置产生假语法错，本会话白绕一圈）。
 
 ## 数据通道
 
@@ -49,6 +76,16 @@ manifest.json 最小结构：`{"name": "<id>", "label": "...", "description": ".
   ```
   视图/筛选/搜索词全部记住，重开插件恢复。
 - **失效筛选自动回退**：数据刷新（删除会话等）后，选中项可能已不存在——用 useMemo 校验 `options.some(o => o.key === f.x)`，不存在则回退默认值，避免筛选悬空。
+- **对象显示名覆盖（displayOverrides，v1.4.3）**：用户「重命名显示名」= 只改列表显示、不动原始数据。`ctx.storage` 存 `{objectKey: 自定义名}`，`objectLabel(s, t, overrides)` 先查覆盖名再回落原逻辑，`buildFilterOptions` 同步接收 overrides 生成选项标签（筛选列表也显示自定义名）；清空输入 = 删 key 恢复默认。空值恢复默认是用户可感知的安全网，对话框初始值 = `overrides[key] || 原始label`。
+- **列表行操作按钮必须常显**（2026-08-09 用户反馈「重命名也没有」「删除时直接删会话」根因）：对象行的 ✏️/🗑 用 `opacity-0 group-hover:opacity-100` 隐藏后用户根本发现不了，误以为功能缺失、误操作别的入口。**管理类操作（重命名/删除分类）一律常显**；危险批量删除（按对象删全部会话）用户明确否决「不删会话」，对象行不做破坏性批量操作，删除只保留单会话级（带确认流）。分类删除 = 纯前端从 sessionCats 映射移除，会话数据一条不动。
+- **批量赋分类（v1.4.3）**：列表头部「选择」按钮切换 selectMode → 每行 checkbox（`Codicon check/circle-outline`）→ 底部批量条出现「批量分类」下拉（DropdownMenu 列分类，onSelect 批量写 sessionCats）→ 完成 notify + 清空选择。多选 state 独立于 selectedId（选中查看）不冲突。
+- **批量 mutation（v1.5.0）**：批量置顶/归档 = `selectIds.map(sid => apiRest('/pin'|'/archive', {method:'POST', body:{session_id, profile, pinned|archived}}))` + `Promise.allSettled` 后统一 `invalidateQueries` + notify + 清空选择。批量条按钮 `disabled: !selectIds.length`。
+- **全文搜索模式（v1.5.0，对标 Pi Session Manager 的标配）**：
+  - 后端：`GET /search?q=&limit=` → `search_messages()` 扫**全部 profile** 的 messages 表 `content LIKE %q%`（`ORDER BY id DESC` 最新优先），**按 session_id 去重**（同会话多命中只留最新一条），附会话上下文（title/source/user_id/display_name/chat_type 子查询）。空查询返回零命中不抛错。SQLite LIKE 对中文是子串匹配（无分词问题），万级消息量够用；百万级才需要 FTS5。
+  - 前端：`useQuery({queryKey:[ID,'search',searchQ], enabled: searchQ.length>=2, staleTime:15000})`——queryKey 带搜索词天然防抖（输入变化才重新请求），无需手动 debounce。列表头部渲染「消息内容命中 N 条」徽标（`search.hits` 函数插值），点击 `setSelectedId(first.session_id)` 跳转首个命中会话。
+  - **搜索框语义扩展**：原 matchesAll 的 query 只搜标题/ID/人名，全文搜索补上消息内容维度——搜索框同时覆盖三类。
+- **右键上下文菜单（v1.5.0）**：行 div 加 `onContextMenu: e => {e.preventDefault(); setCtxPos({x:e.clientX,y:e.clientY}); setCtxOpen(true)}` + 受控 `DropdownMenu open={ctxOpen} onOpenChange` + `DropdownMenuContent style={{position:'fixed', left:ctxPos.x, top:ctxPos.y, zIndex:9999}}` + `sr-only` 的 DropdownMenuTrigger（隐藏锚点）。复制用 `navigator.clipboard.writeText` + notify。⚠️ 选择模式下禁右键（`if (selectMode) return`）。
+- **排序切换（v1.5.0）**：`sortMode` state 持久化 ctx.storage（'last'|'created'|'title'）；标题排序用 `localeCompare(other, 'zh-Hans-CN')` 中文感知；头部 DropdownMenu 三项带 `check` 勾选态，onSelect 同时 setState + `apiStorage.set`。
 - **多条件组合筛选模型**（用户纠正过「不能同时筛选平台和会话人了」）：筛选器对象 `{platform, person, status, type, query}`，五个维度独立可叠加（AND），每个维度内部单选（再点取消）。左栏分「平台/会话人/状态/类型」四个筛选区 + 搜索框；右栏标题显示当前组合（如「飞书 · 徐学环 · 已置顶」）带一键清除。不要用单选导航（一次只能选一个维度）。
 - **会话对象键通用化**（主流平台适配）：`objectKey(s)` 对所有平台归一——本地会话='local'、群/频道='group:chat_id'、话题='topic:chat_id:thread_id'、私聊='person:user_id'。`objectLabel(s)`：群=群名（display_name）、话题=群名/平台话题、私聊=user_name 或 userFallback（数字 ID→「用户 后四位」、超长截断、ou_ 开头→飞书用户）。飞书群 display_name 是群名，其他平台群名也在 display_name。
 - 每个筛选区独立计数：`buildFilterOptions(all)` 一次算好 {platforms, persons, groups, localCount, statuses, types}，UI 与校验都从它取。
@@ -67,6 +104,23 @@ manifest.json 最小结构：`{"name": "<id>", "label": "...", "description": ".
 - **详情头部**：返回按钮（arrow-left）+ 标题 + 对象名/平台/消息数 + 「完整打开」（host.navigate 跳聊天页）+ 操作菜单（重命名/置顶/归档/删除复用）。
 - 消息 30s refetch（`refetchInterval`）——新消息进来能看到；会话列表 15s。
 - **左栏筛选分区可折叠**：FilterSection 标题行变 button（chevron-down/right），默认全展开；折叠时若区内有激活筛选，靠右栏标题的「清除筛选」兜底不迷路。
+
+## Windows subprocess 四坑 + 服务检测三路直查（ops-panel 实测 2026-08-09）
+
+插件后端（plugin_api.py / service.py）用 subprocess 查系统状态、跑 git 的四个坑：
+
+1. **PowerShell 检测命令自匹配**：`Where-Object { $_.CommandLine -like '*marker*' }` 会把 powershell.exe 自己算进去（`-Command` 参数里含 marker 字符串）→ 误报目标进程存在。**必须限定进程类型**：`$_.Name -match 'python' -and $_.CommandLine -like '*marker*'`。
+2. **PS 表达式里 `and` 不合法**：脚本块表达式必须用 `-and`（`and` 是语句级关键字），否则报"位置 行:1 字符: N"语法错。`$_.Name -eq 'X' and $_.Y -like 'Z'` 错，`-and` 对。
+3. **subprocess 编码**：Windows 中文系统 `text=True` 默认按 GBK 解码子进程输出。**git 输出是 UTF-8**（diff 含中文注释），GBK 解码出乱码/替换符 → 写回 diff 文件即损坏 → `git apply --check` 必失败。git 调用必须 `subprocess.run(..., encoding='utf-8')`；powershell 保持默认 GBK。
+4. **write_text 的 CRLF 坑**：Python 写文本默认 `newline=None`，Windows 上把 `\n` 转成 `\r\n`。**写 git diff 文件必须 `write_text(content, encoding='utf-8', newline='\n')`**——CRLF 的 diff 文件 `git apply --check` 失败（本会话双坑叠加：GBK 乱码 + CRLF，正本 diff 连续坏两次）。
+
+**服务状态检测三路直查（不调 hermes CLI）**：端口（`netstat -ano` 找 LISTENING + PID）· 进程（CIM 按 CommandLine 匹配，限定 python）· 计划任务（`Get-ScheduledTask` State: Ready/Running/Disabled）。**不要用 `hermes gateway status` 等 CLI 查状态**——可能触发中断 update 的恢复流程连带停 gateway。
+
+**⚠️ 批量状态查询两坑（2026-08-10 ops-panel 实测）**：
+1. **`Get-ScheduledTask | ConvertTo-Json` 的 State 是枚举数字**（TaskState: 0=Unknown, 1=Disabled, 2=Queued, 3=Ready, 4=Running），不是字符串 `"Ready"`——字符串比较全不匹配导致 alive 判定全错。Python 侧映射 `{"1":"Disabled","3":"Ready","4":"Running"}`。
+2. **串行逐服务查 = 性能灾难**：六服务 × 每个 2-3 个 powershell/netstat 子进程（冷启动 1-2s）≈ 11s。合并为 3 次批量调用（一次 `netstat -ano` 解析全部端口、一次 `Get-CimInstance` 取全部 python 进程 + `ConvertTo-Json -Compress` 输出防分隔坑、一次 `Get-ScheduledTask -TaskName 'a','b'` 查全部任务）+ TTL 缓存（3s）→ 首次 2.6s、缓存命中 13ms。**写操作后 `_invalidate_services_cache()` + `get_services_status(force=True)`**（防操作后读到旧缓存）。
+
+**一键更新编排顺序（Windows，ops-panel 模式）**：① 禁用 watchdog（防更新期间拉起 gateway 锁 venv）→ ② 停远程 serve/守卫/gateway（计划任务 Stop + taskkill 兜底）→ ③ 关桌面 app（检测 Hermes.exe 主进程，排除 `--type=` 子进程；守护进程可倒计时自动杀）→ ④ 执行 update → ⑤ 补丁自检恢复（git apply --check --reverse 正本 diff）→ ⑥ 恢复服务。runner 用 `DETACHED_PROCESS | CREATE_NO_WINDOW` 启动独立 python 进程（app 关闭后接管），状态机用标记 JSON 文件驱动（`state/ops-panel-update.json`）+ 日志文件（`state/ops-panel-update.log`），面板轮询展示。
 
 ## 测试方法（不重启也能测）
 
@@ -89,6 +143,10 @@ manifest.json 最小结构：`{"name": "<id>", "label": "...", "description": ".
 - **恢复路径**：Ctrl+Shift+S（`view.toggleStatusbar`，`lib/keybinds/actions.ts` 默认 `mod+shift+s`）或 ⌘K 搜 "Toggle Statusbar" → 状态栏出现；在状态栏上**右键**勾选要显示的项目。
 - **诊断入口**：`~/AppData/Local/hermes/logs/desktop.log` grep `runtime load|error-boundary|SyntaxError|ReferenceError` 看插件加载失败；`~/AppData/Local/hermes/desktop-build-stamp.json` 的 `builtAt` 看桌面构建版本。**packaged build 不开 CDP**——9222 端口可能是用户自己开的 Chrome（`/json/list` 里 title 是 chrome://newtab 就是），别当桌面应用连。
 - **插件加载失败两种报错形态**：`runtime load failed (<id>) SyntaxError: Invalid or unexpected token` = plugin.js 语法错误（或 SDK 不兼容的旧语法）；`error-boundary:contrib:<id>-plugin:pane ReferenceError: X is not defined` = 渲染期引用了未定义标识符（漏 import 或旧代码残留）。**但看到 error 日志先别急着修文件**——先按下面的方法论验证是不是历史遗留（web-browser 案例：错误看似真实，深挖后证明文件无 bug，是旧版本记录）。
+- **⚠️ 第三种形态（completion-sound 错误，2026-08-09 两轮实测修正）**：`runtime load failed (<id>) SyntaxError: Unexpected token ']'` 或 `ReferenceError: moduleT is not defined` 且**错误文件路径是 `app.asar/dist/assets/completion-sound-*.js`**（app 自己的音频资源，不是插件文件）。分两种结局：
+  - **历史遗留/写入竞态**：touch 热加载无新增错误 + **重启后不再报** = 忽略旧记录。
+  - **⚠️ 持续失败（本轮新增）**：touch 无新增错误**但重启冷加载仍报**（desktop.log 行号持续增长、多个页面插件同错、包括从未动过的插件如 web-browser）→ **不是插件代码问题，是桌面端产物/运行时加载链缺陷**（本机案例：12:05 桌面端自动重建后出现，quota-panel/skill-manager 不报而页面插件全报）。**touch 热加载通过 ≠ 冷加载正常**（热加载有缓存掩盖），别据此判健康。
+  - **深挖链**（全验证过）：① `node --check plugin.js` 排除插件语法 → ② **asar 内容验证**：`npx @electron/asar listPackage <asar>` 能列出 + node API `extractFile(p, path)` 提取 chunk（⚠️ CLI `extract-file` 对 Windows 路径报 "not found"——用 node API 且路径去前导反斜杠；在 `"type":"module"` 包里验证脚本要 `.cjs`）→ ③ `node --check` 提取出的 chunk（本机 completion-sound 144KB 语法正常）→ ④ 依赖链完整性：正则 `from"\./([^"]+)"` 提取兄弟 chunk 逐一 extractFile（本机 30+ chunk 全完整）→ ⑤ 全正常则判定桌面端产物缺陷，修复 = 重建桌面端（`cd apps/desktop && npm run build && npm run builder -- --dir`，builder 需关 app 防 asar 文件锁）。
 - 详细清单、时间线验证法与 web-browser 案例全程：`references/desktop-ui-panels-statusbar.md`
 
 ### 插件「加载失败」深挖方法论（2026-08-06 实测，web-browser 案例）
@@ -108,6 +166,8 @@ desktop.log 有错误 ≠ 当前有 bug。判定顺序：
 
 ## 参考
 
+- `scripts/verify-asar-chunk.cjs` — **app.asar chunk 完整性验证**（提取 + node --check + 依赖链检查）。completion-sound 类错误深挖用：`node verify-asar-chunk.cjs <app.asar> <chunk名>`（⚠️ CLI `extract-file` 对 Windows 路径报 not found，用此 node API 版；路径去前导反斜杠）。
+- `scripts/audit-tailwind-classes.py` — **插件 className 存在性审计**（对照 Hermes 编译 CSS，Tailwind 转义精确匹配）。任何插件写完后必跑，防止 UI 静默破损回归。用法：`python audit-tailwind-classes.py plugin.js [dist-css-dir]`。
 - `references/filter-model.md` — 多条件筛选模型（五维 AND）、失效回退、会话对象键跨平台归一、双栏 UI 组织、状态记忆、node 冒烟测试。任何列表类插件直接复用。
 - `references/message-detail-pane.md` — 消息详情面板通用模式：/messages 后端路由（resolve_session_id + resolve_resume_session_id）、三栏布局、选中管理、分角色渲染、折叠展开。任何「列表+详情」类插件直接复用。
 - 官方 SDK 接口参考：bundled `hermes-desktop-plugins` skill（不可编辑）。
@@ -120,6 +180,7 @@ desktop.log 有错误 ≠ 当前有 bug。判定顺序：
 ## 用户偏好（本机）
 
 - UI 中文、高密度、theme vars（`--ui-*`）不硬编码颜色。
+- **插件名用中文**（2026-08-09 拍板）：manifest.json 的 `label` + 侧边栏导航 + 面板标题 + 命令面板全中文（先例：channel-sessions label「渠道会话管理」、ops-panel label「运维面板」）；**id 必须英文 kebab-case**（SDK 硬限制，目录/API 路径用）——中文项目/插件用拼音或英文 id + 中文显示名（同飞书看板 slug 规则）。
 - **宽屏双栏/三栏**：左栏导航/筛选 + 右栏列表（v1 单栏被嫌「排版不直观」）；数据管理工具进一步接受三栏（筛选|列表|详情）——用户要「直接看内容不跳转」，点列表行右侧同屏显示详情。
 - **多条件组合筛选**：平台 × 会话人 × 状态 × 类型 × 搜索独立叠加（AND）——用户明确纠正过「不能同时筛选平台和会话人了」，单选导航被否。
 - **UI 状态记忆**：视图/筛选/搜索持久化到 ctx.storage，重开恢复（用户原话「记忆我选的」）。

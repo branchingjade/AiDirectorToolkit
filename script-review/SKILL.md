@@ -1,6 +1,6 @@
 ---
 name: script-review
-version: 1.0.0
+version: 1.0.1
 description: "审读/分析影视剧本，长剧本结构化拆解、钩子追踪、完整度检查。触发词：审读剧本、分析剧本、剧本评估、拆解剧本。"
 ---
 
@@ -10,7 +10,7 @@ description: "审读/分析影视剧本，长剧本结构化拆解、钩子追�
 
 ## 前置：从飞书拉取剧本
 
-剧本常以飞书文档形式交付。加载 `lark-doc` skill，用：
+剧本常以飞书文档形式交付。**但用户直接在飞书聊天里发 docx 时，文件缓存在 `AppData\Local\hermes\cache\documents\`，`read_file` 能直接自动提取全文分页读完（实测 5114 行 240KB 剧本三页读完，中文 docx 无二进制误判），跳过飞书拉取流程。** 只有剧本以飞书云文档（URL/token）交付时才走下面的 lark-cli 拉取。加载 `lark-doc` skill，用：
 
 ```bash
 mkdir -p _work
@@ -48,9 +48,17 @@ open('_work/script.md', 'w', encoding='utf-8').write(content)
 2. **逐条挂局部评论**（Review 场景禁止把问题合并成一条全文评论）：
    ```bash
    lark-cli drive +add-comment --doc "<URL>" --block-id "<BLOCK_ID>" \
-     --content '[{"type":"text","text":"评论内容"}]'
+     --content "$(cat c1.json)"
    ```
    最后加一条全文总评（不带 `--block-id`）。评论格式：**点评/吐槽 + 优化建议 + 为什么**（用户明确要求每条都要有「为什么」）；每条开头用【类型】标注（【结构问题】【逻辑漏洞】【人物】【对白】【格式】【亮点】），100-200 字精炼。
+
+   **⚠️ JSON 生成铁律（2026-08-07 实战教训）**：`--content` 参数**禁止手拼 JSON 字符串**——评论文本含引号时极易破语法（ASCII 直引号 `"` 未转义必炸；中文弯引号 `""` 无需转义）。一律用 `json.dumps` 生成，评论先落盘再挂：
+   ```bash
+   # 每条评论写 cN.txt → 转成 cN.json → 验证 → 挂
+   python -c "import json; print(json.dumps([{'type':'text','text':open('c1.txt',encoding='utf-8').read()}], ensure_ascii=False))" > c1.json
+   python -m json.tool c1.json > /dev/null && lark-cli drive +add-comment --doc "<URL>" --block-id "<BLOCK_ID>" --content "$(cat c1.json)"
+   ```
+   或者短评论内联：`--content "$(python -c 'import json,sys; print(json.dumps([{"type":"text","text":sys.stdin.read()}], ensure_ascii=False))' <<< '评论内容')"`。写文件被 JSON 校验拒绝 = 语法问题，修正重写后再挂，不要跳过校验硬推。
 
 3. **陷阱**：
    - 部分 block 挂评论报 `1069301`（General operation failure，与内容无关，短内容也一样）→ 换相邻 block 挂，位置仍准确。
@@ -69,6 +77,8 @@ open('_work/script.md', 'w', encoding='utf-8').write(content)
    - 基线存档：把最近一次 fetch 的 markdown `cp` 到固定路径（如 `~/AppData/Local/hermes/cron/output/<项目>_last.md`）
    - cron prompt 内：拉取 → `cmp -s` 对比基线 → **无变化则一句话简报结束（不评论、不改基线）**，有变化才审读+挂评论 → 更新基线
    - 单轮评论控制在 8 条以内，只挑最重要的；查已有评论避免重复评
+   - **知识库先行（2026-08-10 用户拍板，伏妖记审读 cron 实战验证）**：审读必须用「妖玉影视知识库」的尺子说话，不是凭感觉——cron 挂载知识库 skill（招式速查 51 条+场景检索表+题材密码索引自动加载）；按题材必读对应题材密码（如志怪→`references/题材密码/志怪题材密码.md`，妖是照镜/执念即妖/学人的别扭/被迫的恶使爱成立）；审到具体场景类型查检索表定位大师卡片；每条点评带依据标注（【题材密码·X】【卡片·片名】【招式速查·X】），禁止无依据泛泛意见；知识库先行验证法=可优化就落地成评论、已达标明确说达标（不硬挑毛病）
+   - **术语纪律（2026-08-10，国风/志怪项目）**：结构描述用起承转合/拍/信息一层层揭开，禁用三幕/建置/对抗/弧光/Chekhov's Gun 等西方教材术语命名；西方理论（Syd Field/McKee）只作思考跟脚不用于对外命名；评论/简报出现西方术语=不合格重写
 
 ## 深度打磨模式：逐场三关审查 + 分支管理（2026-08-06 实战验证）
 

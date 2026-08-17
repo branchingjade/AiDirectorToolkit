@@ -53,12 +53,22 @@ metadata:
 
 3. **防火墙**：Windows 放行 hermes.exe 入站（默认已有规则）或 9119 端口。
 
-4. **开机自启**（可选）：计划任务直接执行 python（**不要用 .cmd 包装脚本——实测计划任务跑 .cmd 起不来**，schtasks 查询 Last Result=1；改成 cmd /c 内联 cd && python 才成功）：
+4. **开机自启**（可选）：计划任务**直接执行 `pythonw.exe`** + 参数 + 起始于（WorkingDirectory）。**不要包 `cmd /c` 壳、不要用 `python.exe`**——两者都会弹黑窗口且常驻（2026-08-07 实测：cmd /c 壳登录自启即弹「选择 C:\WINDOWS\system32\cmd.EXE」窗口，serve 长驻进程让窗口永不消失）。schtasks /create 无 WorkingDirectory 参数，用 PowerShell 建：
+   ```powershell
+   $action = New-ScheduledTaskAction -Execute "C:\Users\<用户>\AppData\Local\hermes\hermes-agent\venv\Scripts\pythonw.exe" -Argument "-m hermes_cli.main serve --host 0.0.0.0 --port 9119" -WorkingDirectory "C:\Users\<用户>\AppData\Local\hermes\hermes-agent"
+   Register-ScheduledTask -TaskName "HermesRemoteServe" -Action $action -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Principal (New-ScheduledTaskPrincipal -UserId "<用户>" -LogonType Interactive -RunLevel Highest) -Force
    ```
-   schtasks /create /tn "HermesRemoteServe" /tr 'cmd /c cd /d C:\Users\<用户>\AppData\Local\hermes\hermes-agent && venv\Scripts\python.exe -m hermes_cli.main serve --host 0.0.0.0 --port 9119' /sc onlogon /rl highest /f
-   ```
-   - 验证：`schtasks /run /tn "HermesRemoteServe"` → sleep 10 → `netstat -an | grep ":9119.*LISTENING"`；失败查 `schtasks /query /tn "HermesRemoteServe" /v /fo list`（Last Result=1 即启动失败）
-   - git-bash 里创建时 `/tr` 参数用单引号包住整个 cmd 串（含 `&&`），避免 MSYS 转义
+   - RunLevel **必须 Highest**（serve 以管理员运行；窗口守卫也要同级才能操作它的窗口，见下）
+   - 验证：`Start-ScheduledTask -TaskName HermesRemoteServe` → sleep 10 → `netstat -an | grep ":9119.*LISTENING"`；失败查任务状态/Last Run Result
+   - 已跑着的 serve 要换启动方式：杀旧进程树（cmd 壳 + pythonw + 其子进程）→ Start-ScheduledTask 重拉 → 端口恢复即成功
+
+#### ⚠️ 弹黑窗口三层根因链（2026-08-07 实测，完整排障记录见 references/windows-console-popup-and-uipi.md）
+
+1. **cmd /c 壳窗口**：cmd 是控制台程序，登录自启即显示窗口，且因 serve 是长驻进程、cmd 等它退出，窗口常驻 → 任务动作直接 pythonw.exe 解决
+2. **pythonw 内部 AllocConsole 自建窗口**：serve 的 pythonw 进程内部某 C 扩展/launcher 调 AllocConsole，自建 conhost 黑窗口（标题「选择 <pythonw.exe 完整路径>」、类名 ConsoleWindowClass、内容 = serve 的 stdout）——**启动 flags 挡不住进程内部自建窗口**，只能用守卫脚本轮询隐藏
+3. **UIPI 权限隔离（守卫失效根因）**：serve 以 Highest（高完整性）运行，其窗口属高完整性进程；若窗口守卫以 Limited（普通）权限运行，`GetWindowText`/`ShowWindow` 被 UIPI 拦截——守卫枚举得到窗口但**读不到标题**（匹配不上标记），隐藏无效。**守卫任务 RunLevel 必须 = Highest**（实测：Limited 守卫只隐藏了它自己的窗口，serve 窗口纹丝不动；改 Highest 后立即可隐藏）
+- **治理**：本机 `scripts/hide_hindsight_window.py` 守卫（每 2 秒轮询隐藏标题含 `hermes-agent\venv\Scripts\pythonw.exe` 的可见窗口，ShowWindow SW_HIDE），计划任务 `Hermes-HideHindsightWindow` 登录时触发；Hindsight daemon 与 serve 共用（同 pythonw 路径，一个守卫全盖）
+- **诊断要点**：`Get-Process | Where {$_.MainWindowTitle -ne ''}` 定位可见窗口归属进程；`Get-CimInstance Win32_Process` 查命令行/父进程/SessionId；确认守卫「是否真在干活」用决定性测试——脚本 SW_SHOW 故意显示目标窗口 → 等一个轮询周期 → 查是否被重新隐藏（是=守卫正常，否=守卫有权限/枚举问题）
 
 ## 验证鉴权（实测流程）
 

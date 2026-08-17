@@ -109,6 +109,8 @@ Before installing a skill from an unfamiliar repo, evaluate it first. See `refer
 - Skip persona/role-play templates — look for executable workflows
 - Check the coverage gap: does this skill fill a missing phase or duplicate existing ones?
 
+For a worked music-domain example (Suno skill landscape, 5 candidates evaluated from raw SKILL.md bodies, red flags, merge-worthy content): see `references/suno-music-skills-landscape.md`.
+
 ## Trigger Isolation — Hard Disable (config.yaml)
 
 When installed skills may interfere with existing ones (trigger-word overlap, generic names like `MV`/`video prompt`), soft gates **do not work**: editing the description to say "ONLY use when…" or renaming the skill directory with a prefix cannot stop the model from matching on the skill **name** (a name containing `music-video`/`paper-collage` still triggers on those words), and long description gates get truncated by the system-prompt's 57-char window.

@@ -43,9 +43,9 @@ curl -s http://localhost:9177/health
 
 - 单条记忆提炼 3~23s，批量 LLM 调用 38~146s（日志标 `slow llm call`）
 - 还有 `Provider returned empty message content` 空响应，触发 attempt 1/4 重试，进一步拖慢
-- 129 条积压时需数小时消化，期间 recall 严重漏召回
+- **consolidation 是持续追赶不是一次清完**（2026-08-08 实测）：新 retain 持续进队，积压数会反复波动（129→119→54→297→12），「等它消化完」是移动靶——判断「记忆是否生效」用**数据层 API**（memories/list 关键词命中）而非等积压归零
 - 加速选项：`HINDSIGHT_API_LLM_MODEL` 换更快模型 / 调大 batch / 临时放宽 `recall_types`
-- **判断"记忆没生效"前必须先看 consolidation 进度**，别拿一次 recall 结果下结论
+- **判断"记忆没生效"前必须先看 consolidation 进度 + 数据层 API 双确认**，别拿一次默认工具 recall 结果下结论
 
 ## 其他故障症状
 
@@ -67,11 +67,40 @@ curl -s http://localhost:9177/health
 - Obsidian `_hermes/` = 团队协作数据层（成员画像/路由/名单/评论会话，git 归档）——多用户访问控制、结构化映射、可审计归档，Hindsight 替代不了
 - 桌面会话项目记忆 → Hindsight 已完全胜任；飞书协作记忆 → 保留 Obsidian 层
 
-## 架构结论（2026-08-07 用户拍板：Obsidian 层保留，不砍）
+## 数据层验证 API（recall 之外的最硬证据，2026-08-08 实测）
 
-**实测结论**：飞书内容虽 retain 进 Hindsight（document 列表可查），但 recall 收益有限——consolidation 极慢（129 条积压数小时）+ 语义排序偏向桌面内容（飞书内容难进前 10，BM25 命中 16 个候选但 top 10 全被桌面内容占）。**用户据此拍板：Obsidian `_hermes/` 架构（项目记忆/画像/路由）合理弥补 Hindsight 短板（多用户维度、人可读、确定性查找），维持现状不砍**。
+recall 是语义检索（相关性排序 + token 预算截断），**返回结果受排序影响，不能当作"内容是否存在"的判据**。要确证内容在不在 bank 里，直接查数据层（API 端口 9177）：
+
+```bash
+# 1. bank 统计：total_documents / pending_consolidation / nodes_by_fact_type
+curl -s http://localhost:9177/v1/default/banks/hermes/stats
+
+# 2. 记忆列表直查（内容是否入库的最硬证据）——关键词 grep 命中的 text 字段
+curl -s "http://localhost:9177/v1/default/banks/hermes/memories/list?limit=50" | python -c "import sys,json; d=json.load(sys.stdin); items=d if isinstance(d,list) else d.get('memories',d.get('items',d.get('results',[]))); [print(json.dumps(it,ensure_ascii=False)[:200]) for it in items if '关键词' in json.dumps(it,ensure_ascii=False)]"
+
+# 3. 原始 recall API（绕开工具层截断，加大 limit 看全量排序）
+curl -s -X POST http://localhost:9177/v1/default/banks/hermes/memories/recall -H "Content-Type: application/json" -d '{"query":"关键词","limit":60}' | python -c "import sys,json; [print(f\"[{i}] {r.get('text','')[:120]}\") for i,r in enumerate(json.load(sys.stdin).get('results',[]))]"
+```
+
+**坑**：curl 直接 `-d '{中文 JSON}'` 可能报 `{"detail":"There was an error parsing the body"}`（shell 引号/编码）——用 Python urllib 或 `--data-binary @文件` 发 body。响应结构 `{"results":[...], "entities":[...]}`，每条含 `text/type/scores.final`。
+
+## 架构结论（2026-08-08 验证定稿：Hindsight 可靠，项目记忆层可降级）
+
+**验证过程教训（重要）**：2026-08-07 曾因 consolidation 未消化完 + 默认工具 recall 只显前几条，**过早下结论「recall 收益有限、Obsidian 保留不砍」并写进记忆**——用户纠正「等验证后在做决定」。次日验证推翻：consolidation 消化完（297→12）+ `limit=60` 全量 recall 后，**飞书内容明确可召回**（[6]萧烬/金玄/神域、[10]魔王/收购命中，返回 11 条中 2 条飞书内容）。
+
+**定稿结论**：
+- **飞书项目记忆可靠 Hindsight**：recall 可召回（排第 6/10 位=排后面不是搜不到，前 5 名被桌面内容占是语义排序+token 截断的常态，不是故障）
+- **Obsidian `_hermes/项目记忆/` 已于 2026-08-08 直接删除**（用户拍板「那就只是删掉吧，项目记忆这个」，非降级保留）——伏妖记.md/魔王.md/项目记忆.md 全部 `git rm`（git 历史仍在）
+- **画像/路由/名单仍留 Obsidian**：Hindsight 单 bank 无用户隔离，多用户维度（访问控制/确定性映射/人可读）替代不了
+
+**删除落地三件套（2026-08-08 实测，删 Obsidian 目录必做）**：
+1. **删目录**：`git rm -r _hermes/项目记忆/`（git 历史保留）
+2. **停写它的代码钩子**——⚠️ 这是最容易被漏的：`record_project_memory()`（feishu_comment_collab.py:379）内部 `path.parent.mkdir(parents=True, exist_ok=True)` **会静默重建已删目录**。只删目录不删钩子 = 下次飞书协作沉淀时目录自动复活。正确做法：函数入口加 early-return（保留签名、log 一条 disabled 说明），一处改动覆盖 IM + 评论两个调用点
+3. **移除 agent 提示模板里的标记指令**：`PROJECT_MEMO: <事实>` 的提示文案在 feishu_comment.py:1175 + gateway/run.py:4453 各一处（`combined_ephemeral` 拼接），不删则 agent 继续输出无意义标记行；剥除逻辑（run.py:5733 起）保留无害
+4. 同步 MOC 引用（记忆MOC.md/飞书协作记忆MOC.md/MOC.md 改为「→ Hindsight」）+ 补丁存档（`scripts/patches/` 的 diff + collab.py 备份 + reapply-patches.py 注释）
 
 **推论（别再犯）**：
-1. 遇到「Hindsight 搜不到 X」先走诊断流程（激活→retain→consolidation），**别急着下"没打通"的结论**，更别为此去建打通代码——管线天生是通的
-2. 评估「能否砍 Obsidian 记忆层」时，区分「记忆」（Hindsight 能管）与「非记忆」（结构化数据/人可读文件/多用户权限——Hindsight 管不了）
-3. 验证 recall 用目标渠道专属词（飞书内容用魔王世界观词），返回全是桌面内容 ≠ 没 retain，是 consolidation 未消化 + 排序问题
+1. **验证未完不下定论**——评估类任务（能否砍/是否打通）未验证完之前：不删监控设施（cron）、不把结论写死进 memory。用户原话「等验证后在做决定」
+2. **子代理/cron 自报不可信**——cron 自动验证报告「打通成功」也要独立复验（本会话 cron 报告属实但早期工具 recall 显示前几条全桌面，直到 limit=60 才确认）。验证链：数据层入库（memories/list）→ 全量 recall（limit=60）→ 才下结论
+3. 遇到「Hindsight 搜不到 X」先走诊断流程（激活→retain→consolidation→数据层 API），别急着下"没打通"的结论，更别为此建打通代码——管线天生是通的
+4. 评估「能否砍 Obsidian 记忆层」时，区分「记忆」（Hindsight 能管）与「非记忆」（结构化数据/人可读文件/多用户权限——Hindsight 管不了）

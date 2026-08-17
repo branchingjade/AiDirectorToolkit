@@ -55,3 +55,40 @@ hermes curator status         # 技能生命周期管理状态
 1. 一句话总结（如「安全有缺口、效率有优化空间、5 个功能没启用」）
 2. 按优先级排列的推荐清单（每项一行：功能名 + 当前状态 + 一个命令）
 3. 不与用户已明确拒绝的功能纠缠（如用户说「声音需求不大」就跳过 Voice Mode）
+
+## 插件库审计（hermes plugins list，2026-08-14 实测）
+
+- `hermes plugins list` = ~80 个 bundled 插件全量注册表（分类清单见 `plugin-toolset-inventory.md`）
+- **解析坑**：输出是 box-drawing 表格且描述列跨行折行——awk 切描述列会把折行碎片当独立行、输出稀碎。只提取名称列：
+```bash
+hermes plugins list 2>&1 | sed 's/\r//g' | grep -oE '│ [a-zA-Z0-9_-]+ +│ [a-zA-Z ]+ +│ [0-9.]+ +│' | awk -F'│' '{gsub(/ /,"",$2); print $2}' | sort
+```
+- **「not enabled」≠「没在用」**：bundled 插件注册表状态与实际启用是两回事。真正启用的插件（桌面插件 quota-panel/skill-manager/channel-sessions/ops-panel）在 config.yaml `plugins.enabled` 列表；config 驱动的功能（飞书平台、web.backend=ddgs）不走插件开关——列表显示 not enabled 但功能照常在用。判断启用状态先 grep config.yaml，别只看插件列表。
+
+## 工具集审计（hermes tools list）
+
+- 一次看全：已启用/禁用工具集 + MCP servers 列表
+- 判读要点（本机实测）：
+  - context_engine = 空壳扩展点（tools 列表为空），无实际工具，默认禁用正常
+  - video_gen 工具要付费后端 key（xAI/Veo）；bfl（FLUX 3 视频）免费走 Nous gateway——用户已有外部视频管线时 video_gen 无增量
+  - MCP server 的 config `enabled: false` 是用户 MCP 铁律（默认关、用完即关），不是故障，别"修"
+
+## 候选开启项评估框架（四查，2026-08-14 确立）
+
+用户问「XX 要不要开」时按四查评估，每条结论带证据（用户铁律：下结论必须带证据来源）：
+
+1. **现有管线覆盖查**：该能力用户已有通道是否已覆盖？（A2A vs delegate_task 同机并行 / Tailscale 远程网关 9119 / 飞书 + API Server 8642；video_gen vs Seedance+RunningHub+ComfyUI）
+2. **最小必要查**：用户偏好方案收敛、拒绝锦上添花——低价值可选默认不推（spotify、可观测性类）
+3. **生态配套查**：协议类先查有没有 peer——无兼容对象 = 插座没插头，不开（A2A 案例）
+4. **成本查**：免费优先（web-brave-free / ddgs / stt 本地 faster-whisper / disk-cleanup / security-guidance），付费 key 按需
+
+## 外部框架评估（非 Hermes 生态，DeepSeek Harness 案例 2026-08-14）
+
+用户问别的 agent 框架/工具时：
+- 先抓官方仓库事实（README 中文版：开发者预览、官方明示「未来将出现破坏兼容性的变更」）
+- 评估三问：①成熟度（开发者预览 = 不碰）②资产可迁移性（skills/知识库/cron/飞书集成不可迁移）③模型无关性（换框架 ≠ 换模型，当前 provider 链路无绑定）
+- 结论模式：了解即可不迁移；顺带澄清它和用户在用模型的关系（dsh 是 V4 Flash benchmark 的测试框架）
+
+## 用户追问模式（2026-08-14 实测）
+
+「其他的呢 / 工具集呢 / A2A呢 / DS的harness」连问 = 用户要**一次给全量分类盘点**（✅建议 / ⚠️可选 / ❌不建议+一句话原因），不是逐项等确认。每轮答复覆盖该层全部候选，❌ 项也列出——用户会追问到每一类，先分类全量列出省得被追着补。

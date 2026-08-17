@@ -76,6 +76,25 @@ cp -r ~/Nutstore/1/我的坚果云/Hermes备份/.hermes ~/
 cp ~/Nutstore/1/我的坚果云/Hermes备份/AppData/state.db ~/AppData/Local/hermes/
 ```
 
+### 从本地备份 tar 恢复误删文件（2026-08-12 实测）
+
+`backup-hermes-webdav.py` 除上传 WebDAV 外，**本地 `~/Documents/Hermes/backups/` 也保留最近 7 个 `hermes-<日期>_<时间>.tar.gz` 完整工作区快照**（含全部 untracked 文件）——误删正式工具/文件时先查这里，通常当天早上的包就有删除前的版本。
+
+恢复步骤：
+1. **选包**：`ls -la backups/` 找删除之前的包（cron 8:30 跑备份 → 删除发生在当天上午之后的，用当天 8:30 的包；跨天用最近一次）
+2. **先确认文件在包内**：`tar -tzf <包> | grep 文件名`（列出即可，不一定要解压）
+3. **提取**——⚠️ 用 Python tarfile 提取单文件，不要用 bash tar 解包：
+   ```python
+   import tarfile, os
+   with tarfile.open(TAR, 'r:gz') as tf:
+       data = tf.extractfile('workspace/scripts/xxx.py').read()
+       open(os.path.join(DEST, 'xxx.py'), 'wb').write(data)
+   ```
+   - **bash `tar -xzf` 在 MSYS 下会坑**：`/tmp/backup-restore` 这类路径 bash 和 Python 各解释各的（bash 的 /tmp ≠ Python 的 /tmp），`-C` 目标目录报 "Cannot open"；直接用 Python 提取到 Windows 风格目标路径最稳。注意：Python tarfile 打包有 rglob 重复条目坑（见 Pitfalls），但**提取单文件 `extractfile()` 是另一回事，可靠**——两个坑不要混淆。
+   - **个别备份包会损坏**（gzip: unexpected end of file / "Compressed file ended before end-of-stream marker"——打包时被中断或打包期间文件变化）：`tarfile.open` 报错就换相邻时间点的包，不要死磕一个包（实测 08:32 包坏、08:48 包完好）。
+4. **验证恢复**：字节数对比（`wc -c`）+ `python -m py_compile` 语法检查
+5. **防复发**：恢复的正式工具立即 `git add` 纳入追踪——被误删的根因往往是它们从未进过 git（untracked 文件在清理白名单里容易被漏掉）
+
 ## Mode B — WebDAV 直传（curl）
 
 适用于无本地同步文件夹的场景（如只用 WebDAV 密钥连接坚果云）。
@@ -113,6 +132,25 @@ cronjob action=create schedule="0 8 * * *" name="Hermes WebDAV 备份"
 也可以使用 bash 版（`backup-hermes-webdav.sh`），但需要确保 `bash` 在 Windows PATH 中（见 Pitfalls）。
 
 详见 `references/webdav-nutstore.md`、`references/python-backup-pitfalls.md` 和 `references/baidu-webdav-migration.md`。
+
+## 跨设备迁移（新设备配置 Hermes）
+
+用户在多台设备间迁移 Hermes 时（SteamOS/Mac/新 Windows），**只迁移跨平台通用资产，Windows 专属一律排除**（计划任务守护脚本 .ps1/.cmd/gateway_watchdog.py、STT local_command、Clash 代理、源码本地补丁、cron 内嵌 Windows 路径）。完整自包含迁移提示词模板（可整块粘贴给新设备 Hermes 执行）：`templates/hermes-migration-prompt.md`。
+
+### 实际在用的 WebDAV 端点（2026-08-15 查证）
+
+`backup-hermes-webdav.py` 当前走 **alist → 百度网盘**（不是坚果云）：
+
+| 项 | 值 |
+|---|---|
+| Base URL | `http://<alist-host>:5244/dav/百度网盘/hermes-backup`（中文路径可写，或 URL 编码 `%E7%99%BE%E5%BA%A6%E7%BD%91%E7%9B%98`） |
+| 用户名 | `妖玉` |
+| 密码 | `Huan1120`（脚本内 base64 硬编码：`base64.b64encode("妖玉:Huan1120")`） |
+| 局域网访问 | alist 监听 `0.0.0.0:5244`，同网设备用 `http://192.168.1.208:5244/...` |
+| 跨网访问 | Tailscale `http://100.78.192.8:5244/...` |
+| 备份文件 | `hermes-YYYY-MM-DD_HH-MM-SS.tar.gz`（保留最近 7 份） |
+
+⚠️ 中文用户名 curl `-u` 在 MSYS 下 base64 编码错 → 401，必须 Python 预编码 Basic 头（见 Pitfalls）。新设备拉最新备份：先 LIST 目录解析文件名（grep `hermes-[0-9_-]+\.tar\.gz` 排序取尾），再 GET 下载。
 
 ## Pitfalls
 

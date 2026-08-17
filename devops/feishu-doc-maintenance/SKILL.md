@@ -51,6 +51,29 @@ https://open.feishu.cn/page/scope-apply?clientID=<appId>&scopes=<scope1>%2C<scop
 
 **注意**：bot 创建文档时 `<title>` 标签不一定被识别为文档名（会显示 Untitled）——创建后用 `drive files patch --params '{"file_token":"...","type":"docx"}' --data '{"new_title":"..."}'` 修正（`--params` 必须带 `type`，否则报 missing required query parameter: type）。
 
+## 四·五、文档权限诊断三步法（"有管理权限但改不了"排查）
+
+用户报「挂了管理权限为什么文档改不了」时，**先诊断再动手，不要信口头权限描述，更不要默认是权限问题**（2026-08-13 实测：根因是评论 agent 工具集没挂写工具，权限完全够）。三步：
+
+1. **查协作者列表**：`lark-cli drive +member-list --token <token> --type docx --as bot --fields "*"`（bot 身份可查，不需额外 scope；user 身份反而要 `docs:permission.member:retrieve`）。列表里没有 bot 应用 **≠ 没权限**——文档还有公开权限层。
+2. **查公开权限设置**：`lark-cli drive +permission-get-setting --token <token> --type docx --as bot`。关键字段 `link_share_entity`：**`tenant_editable` = 租户内所有应用/用户可编辑**（bot 属租户 → 能写）；`closed` = 只限协作者列表。
+3. **写探针（无副作用）**：`docs +update --command str_replace --pattern "<文档中不可能存在的串>" --content "x"`。返回 `ok:true` + `result:failed`（degrade_code=1011 no document changes）= **权限通**（只是没匹配到）；返回 permission denied = 真没权限。
+
+**可逆全链路验证**：pattern 用真实存在的词、content 加独特标记（如「妖丹→妖丹♯」），执行后 fetch 验证计数，再改回，确认零残留。这在真实文档上安全，不动正本内容。
+
+**文件夹权限 ≠ 文档权限**：文件夹 member-list 有管理权限不代表内部文档能改——文档权限 per-file 且可能不在该文件夹/已单独设权。别被「共享文件夹管理权限」误导，直接查目标文档本身。
+
+## 四·六、docx 写操作端点速查（docs_ai，lark-cli docs +update 底层）
+
+写工具/脚本直接用这两个 OpenAPI 端点（lark-cli `docs +update`、评论 agent 的 feishu_doc_* 工具都走这里）：
+
+- **读 with-ids**：`POST /open-apis/docs_ai/v1/documents/:id/fetch`，body `{"export_option":{"export_block_id":true},"format":"xml"}` → 返回带 `<p id="...">`/`<h1 id="...">` 的 XML（定位 block_id 用）
+- **写**：`PUT /open-apis/docs_ai/v1/documents/:id`，body `{"command":"str_replace|block_replace","pattern":...,"content":...,"format":"xml","revision_id":-1}`；`block_replace` 额外带 `block_id`，content 是完整 XML 块（`<p>...</p>`/`<h1>...</h1>`）
+- str_replace 返回 `result:failed` + degrade_code=1011 = pattern 没匹配或替换后相同，**不代表失败**——判断成功看 revision 变化 + fetch 验证
+- **block_replace 后旧 block_id 失效**（实测 id 会变，如 `McCCdluIgo...` → `doxcnVkPcsqRsd59bbRBks0Zhuh`），继续操作必须重新 fetch
+- 认证走 `AccessTokenType.TENANT`（bot 身份）；lark_oapi Client 构造 `log_level` 必须传枚举 `LogLevel.WARNING`，传 int 报 `'int' object has no attribute 'value'`
+- 工具发现缓存（tool_discovery_cache.json）按 `(mtime_ns, size)` 自动失效——改 tools/*.py 后无需手动清缓存
+
 ## 五、富功能优化
 
 - **Mermaid 时间轴**：`<whiteboard type="mermaid">` 直接插入 timeline 语法（主 Agent 可做，不需 SubAgent）。插入后 `whiteboard +export --output-type preview` 导出验证渲染——**preview 返回 .jpg，输出路径必须写 .jpg 扩展名**，写 .png 会报 failed_precondition
