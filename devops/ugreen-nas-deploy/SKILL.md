@@ -5,14 +5,23 @@ description: 绿联 NAS（UGOS/Debian）部署服务完整模式——paramiko S
 
 # 绿联 NAS 部署
 
-用户的绿联 NAS：IP `192.168.1.176`（mDNS `hmsj.local` 会被 Clash TUN fake-ip 劫持，必须用真实局域网 IP），SSH 用户 HMSJadmin，aarch64，Debian 12，Docker 26 + Compose v2。Web 管理端口 9999。
+用户的绿联 NAS：IP `192.168.1.176`，mDNS 域名 `hmsj.local`（浏览器/日常应用可直接用，详见下文「mDNS 域名访问」节），SSH 用户 HMSJadmin，aarch64，Debian 12，Docker 26 + Compose v2。Web 管理端口 9999。
 
 ## 铁律
 
 1. **SSH 必须先开**——默认关闭，控制面板 → 终端机里手动开一次。
 2. **绝不碰 `/volume1/@docker` 等系统目录**，项目放 `/volume1/docker/<项目名>/`。
-3. **Clash TUN 会劫持内网 mDNS**——`hmsj.local` 解析成 198.18.x.x fake-ip，连接显示 OPEN 但无 SSH banner。诊断到这一点就直接要真实 IP。
+3. **Clash TUN 只劫持走系统 DNS 的解析，不劫持 mDNS 组播**——`nslookup`/`curl` 解析 `hmsj.local` 会得到 198.18.x.x fake-ip（Clash 虚拟网段），但浏览器/Windows 应用解析 `.local` 域名走 mDNS（UDP 5353 组播）完全正常。**测试 `.local` 域名用 `Resolve-DnsName hmsj.local`，不要用 nslookup/curl 判死刑**（2026-08-17 踩坑后修正，详见「mDNS 域名访问」节）。
 4. **NAS Web UI 访问**：连不上时用 Kimi WebBridge（`browser-control` skill 层3）——通过用户真实 Chrome 登录态直接操作。不用 agent-browser 配 CDP profile 单独登录。
+
+## mDNS 域名访问（hmsj.local）
+
+**正确认知（2026-08-17 用户纠正后定稿）**：`hmsj.local` 一直是通的——浏览器/日常应用解析 `.local` 域名走 **mDNS 组播（UDP 5353）**，Clash TUN 的 fake-ip 劫持的是**系统 DNS 查询**（198.18.0.2），两条路径互不相干。
+
+- **测试工具选择是本次误判的根因**：`nslookup hmsj.local` 走系统 DNS → 返回 fake-ip（198.18.0.220）→ 曾误判「域名被劫持不可用」；而 `Resolve-DnsName hmsj.local` 走 mDNS → 返回真实 IP（192.168.1.176）。**验证 `.local` 域名必须用 `Resolve-DnsName`**，curl 也会踩系统 DNS 的坑。
+- **命令行工具（curl/ssh/脚本）兜底**：hosts 文件加 `192.168.1.176 hmsj.local nas.local`（hosts 优先级高于任何 DNS，绕过 fake-ip）——本机命令行即可稳定用域名。hosts 只对本机生效，其他设备要各自配 hosts 或路由器 DNS。
+- **mDNS 域名天然抗 IP 漂移**：NAS 换 IP 后重新广播 `hmsj.local → 新IP`，局域网设备自动跟随——比写死 IP 更稳，工作站访问优先用域名。
+- **绕不开的例外**：`davinci-pg` 的 compose 端口绑定必须写具体 IP（UGOS 自带 PG 占 127.0.0.1:5432，绑 0.0.0.0 会 EADDRINUSE）——NAS 换 IP 时唯一要手动改的地方。Resolve 的 .bkey 里 `hostIPAddress` 填域名（hmsj.local）是否被接受**待用户 Import Key 实测**（2026-08-17 已生成测试密钥 `HMSJ-local-test.resolvedbkey` 在 Y:\密钥\，原文件未动可回退）。
 
 ## SSH 连接（paramiko）
 
