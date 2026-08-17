@@ -461,6 +461,61 @@ tail -5 ~/AppData/Local/hermes/logs/gateway.log              # 无报错
 
 并行发多个 terminal 调用时共享同一 shell 会话——一个调用里的 `cd` 会干扰另一个的 cwd，造成 `fatal: not a git repository`、目录"找不到"等费解报错（实际文件都在，只是 cwd 漂了）。规避：并行 terminal 调用一律显式传 `workdir` 参数，不依赖共享 cwd。反面案例：整理工作区时并行跑两个 ls/git 命令，一个 `cd branchingjade` 后 cwd 漂到上级目录，另一个报 git 仓库和 `分析/` 目录不存在。
 
+### 共享远程的双副本陷阱（2026-08-17 实测）
+
+同一台电脑上存在**两个本地 git 仓库副本指向同一个 GitHub 远程**时，会静默分叉——各副本独立 commit，远程被两边交替 push，最终 merge-base 旧、历史无法 fast-forward。
+
+**实测案例**：`AppData/Local/hermes/skills/`（branchingjade 身份）和 `Documents/ClaudeCode/AiDirectorToolkit/`（AI-Skills 身份）共享 `AiDirectorToolkit` 远程。07-27 后两条线各自提交 20+ 和 60+ 个 commit，发现时本地 master 已无法 push。
+
+**诊断三步**：
+1. `git merge-base HEAD origin/master` — 分叉点越旧问题越大
+2. `git log --format="%an <%ae>" origin/master | sort | uniq -c` — 多种作者身份=多环境并行
+3. `git rev-list --count HEAD..origin/master` vs `origin/master..HEAD` — 双向领先数
+
+**安全推送方案**（不 force push、不 rebase 破坏本地）：
+```bash
+# worktree + cherry-pick 叠加到远程最新之上
+git worktree add /tmp/skills-push origin/master
+cd /tmp/skills-push
+git cherry-pick <本地提交hash>
+# 冲突时 git checkout --theirs + git add + git cherry-pick --continue
+git push origin HEAD:master
+# 回主仓库清理
+cd <主仓库> && git worktree remove /tmp/skills-push
+# 本地 master 保持原状（不强制同步，分叉留待后续处理）
+```
+
+**根因防范**：仓库内 .git 目录不要复制——clone 只做一次，后续 clone 到新位置或用 worktree。skill-publish 流程必须指向唯一正本路径。
+
+### 批量未归档清理策略（方案 C，2026-08-17 实测）
+
+仓库有数百项未提交改动（跨月积累、多会话遗留）时，**不要一次性 `git add -A`**（会混入运行时垃圾、重复副本、无关目录）。按类别分批处理：
+
+**分类优先级**：
+1. **Hermes 运行时文件**（.bundled_manifest/.curator_state/.usage.json）→ 从 git 追踪移除 + `.gitignore` 排除
+2. **真实工作增量**（SKILL.md 修改、references 补充）→ 按目录批量 commit（一个目录一个 commit）
+3. **与远程一致的残留副本** → `diff -w -B` 忽略空白比对，确认一致后删除（`git clean` 或 `rm`），不重复提交
+4. **本地独有但远程无的资产** → 单独提交（可能是并行会话的成果）
+
+**验证远程一致性的脚本**：
+```bash
+# 拿远程文件列表
+git ls-tree -r --name-only origin/master > /tmp/remote_files.txt
+# 逐文件比对（忽略空白）
+for f in $(git status --short | grep "^??" | awk '{print $2}'); do
+  if grep -q "$f" /tmp/remote_files.txt; then
+    d=$(diff -w -B <(git show "origin/master:$f" 2>/dev/null) "$f" | wc -l)
+    [ "$d" -eq 0 ] && echo "一致: $f" || echo "差异: $f ($d行)"
+  else
+    echo "本地独有: $f"
+  fi
+done
+```
+
+**防 CRLF 假阳性**：Windows git 大批量 add 时 `warning: LF will be replaced by CRLF` 是正常提示，不影响内容，忽略即可。
+
+**目录级未跟踪陷阱**：`git status --short` 只显示 `?? 目录名/` 而非目录内文件。Python 脚本遍历时 `os.path.isfile()` 会跳过目录路径——必须递归遍历或用 `find -type f`。
+
 ### 目录清理白名单陷阱：untracked 正式工具被误删（2026-08-12 实测）
 
 清理 scripts/ 等目录时，**手写 KEEP 白名单会漏掉「untracked 但仍是正式工具」的文件**——它们没进过 git（`git ls-files` 查不到）、也没被 cron/计划任务直接引用，但可能是记忆/skill 里标注的保留工具（弹窗排障工具 pspopup_monitor.py/wmi_powershell_watcher.py、迁移工具链 jianying2davinci.bat/relink_all_episodes.py/scan_compounds.py 曾全部被误删，靠当天备份 tar 找回）。
@@ -539,16 +594,7 @@ User Profile 是**徐学环本人的画像**，不是所有偏好的收纳箱。
 
 ### 技能库命名与副本清理
 
-技能库在 `~/AppData/Local/hermes/skills/`，是一个 git 仓库（`https://github.com/branchingjade/AiDirectorToolkit`），**仅追踪 3 个核心 AI 技能**，统一归入 `妖玉影视/` 分类目录：
-
-```
-妖玉影视/
-├── AI短剧编剧助手/      v2.2.0
-├── AI短剧导演助手/      v12.0.0
-└── AI提示词助手/    v1.4.0
-```
-
-加载时用 `妖玉影视/AI短剧编剧助手` 路径，不加前缀会因其他同名技能产生歧义。
+技能库在 `~/AppData/Local/hermes/skills/`，是一个 git 仓库（`https://github.com/branchingjade/AiDirectorToolkit`），追踪 `妖玉影视/` 核心创作套件（知识库+三棵树）及 100+ 其他分类 skill。加载时用 `妖玉影视/AI短剧编剧助手` 路径，不加前缀会因其他同名技能产生歧义。
 
 **命名铁律**：目录名 = skill name（中文），二者一致。所有英文名目录（`ai-screenwriter-assistant/`、`ai-prompt-assistant/`、`ai-short-drama-assistant/`）和 `ai-skills/` 子目录是旧版残留，不在 git 追踪中——见到直接删。
 

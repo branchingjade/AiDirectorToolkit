@@ -21,7 +21,7 @@ description: 绿联 NAS（UGOS/Debian）部署服务完整模式——paramiko S
 - **测试工具选择是本次误判的根因**：`nslookup hmsj.local` 走系统 DNS → 返回 fake-ip（198.18.0.220）→ 曾误判「域名被劫持不可用」；而 `Resolve-DnsName hmsj.local` 走 mDNS → 返回真实 IP（192.168.1.176）。**验证 `.local` 域名必须用 `Resolve-DnsName`**，curl 也会踩系统 DNS 的坑。
 - **命令行工具（curl/ssh/脚本）兜底**：hosts 文件加 `192.168.1.176 hmsj.local nas.local`（hosts 优先级高于任何 DNS，绕过 fake-ip）——本机命令行即可稳定用域名。hosts 只对本机生效，其他设备要各自配 hosts 或路由器 DNS。
 - **mDNS 域名天然抗 IP 漂移**：NAS 换 IP 后重新广播 `hmsj.local → 新IP`，局域网设备自动跟随——比写死 IP 更稳，工作站访问优先用域名。
-- **绕不开的例外**：`davinci-pg` 的 compose 端口绑定必须写具体 IP（UGOS 自带 PG 占 127.0.0.1:5432，绑 0.0.0.0 会 EADDRINUSE）——NAS 换 IP 时唯一要手动改的地方。Resolve 的 .bkey 里 `hostIPAddress` 填域名（hmsj.local）是否被接受**待用户 Import Key 实测**（2026-08-17 已生成测试密钥 `HMSJ-local-test.resolvedbkey` 在 Y:\密钥\，原文件未动可回退）。
+- **绕不开的例外**：`davinci-pg` 的 compose 端口绑定必须写具体 IP（UGOS 自带 PG 占 127.0.0.1:5432，绑 0.0.0.0 会 EADDRINUSE）——NAS 换 IP 时唯一要手动改的地方。**Resolve 的 .bkey 支持 hostname（2026-08-17 用户 Import Key 实测通过）**——`HMSJ.resolvedbkey` 的 `hostIPAddress` 已正式改为 `hmsj.local`，工作站连库从此免疫 IP 漂移。做法：`nas.py get` 下载 → 本地替换 hostIPAddress → `nas.py put` 覆盖写回 → 读回校验关键字段；测试版先放 `HMSJ-xxx-test.resolvedbkey` 让用户在 Database Manager → Import Key 实测，通过后再覆盖正式版并删测试文件。原文件编辑前先备份思路同上（compose 是 .bak、bkey 是测试版先行）。
 
 ## SSH 连接（paramiko）
 
@@ -166,7 +166,7 @@ UGOS 自带 Python 3.11 但没有 pip：
 
 **端口共存方案（关键坑）**：绿联 UGOS 系统自带 PostgreSQL 15 占用 `127.0.0.1:5432` 和 `127.0.0.1:5433`（照片/视频/音乐服务依赖，不可动）。Docker 端口映射绑定**具体局域网 IP** `192.168.1.176:5432:5432`——Linux 允许具体地址与回环地址同端口共存（ss 验证：127.0.0.1:5432 与 192.168.1.176:5432 同时 LISTEN）。Resolve 连 192.168.1.176:5432 即达容器。若绑定 0.0.0.0:5432 会 EADDRINUSE 失败。
 
-**NAS 换 IP 后服务不可达的根因（2026-08-17 实测）**：NAS DHCP 换 IP（192.168.1.2→192.168.1.176）后，`davinci-pg` 容器健康但 5432 全网不可达——因为 compose 端口绑定写死旧 IP `192.168.1.2:5432:5432`，绑定地址失效。**修复**：`sed -i 's/旧IP/新IP/' docker-compose.yml && docker compose up -d`（保留原文件 .bak 再改）。**诊断链**：ping 通但所有端口 closed + ARP MAC 是本地管理位（虚拟 MAC）→ 直接扫网段找新 IP（绿联管理口 9999 + 目标服务端口）。**防复发**：NAS 上设静态 IP 或路由器 DHCP 保留；davinci 的 .bkey 密钥文件（Y:\密钥\*.resolvedbkey）里 hostIPAddress 也写死旧 IP，换 IP 后工作站需重新导密钥或手动改连接。
+**NAS 换 IP 后服务不可达的根因（2026-08-17 实测）**：NAS DHCP 换 IP（192.168.1.2→192.168.1.176）后，`davinci-pg` 容器健康但 5432 全网不可达——因为 compose 端口绑定写死旧 IP `192.168.1.2:5432:5432`，绑定地址失效。**修复**：`sed -i 's/旧IP/新IP/' docker-compose.yml && docker compose up -d`（保留原文件 .bak 再改）。**诊断链**：ping 通但所有端口 closed + ARP MAC 是本地管理位（虚拟 MAC）→ 直接扫网段找新 IP（绿联管理口 9999 + 目标服务端口）。**防复发**：NAS 上设静态 IP 或路由器 DHCP 保留（2026-08-17 时进不了网关后台，暂缓）；**工作站侧已免疫**——`HMSJ.resolvedbkey` 的 hostIPAddress 填 `hmsj.local`（mDNS 域名，实测 Resolve 支持），NAS 换 IP 后工作站自动跟随，无需重导密钥；只有 NAS 上 compose 端口绑定这处要手动改（见「mDNS 域名访问」节）。
 
 **架构要点**：PG 只存项目库；素材仍走 SMB 共享（HMSJ_A）；渲染缓存/缓存文件夹必须工作站本地 NVMe 绝不放 NAS；Mac/Windows 混合必须配路径映射（Project Settings → Master Settings → Path Mapping）；Resolve 直连 PG 的 UI 默认 5432 无自定义端口选项（Synology 社区踩坑），所以端口方案必须保 5432 可达。
 
