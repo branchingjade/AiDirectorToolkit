@@ -201,7 +201,7 @@
 
 ### 3.1 核心哲学：写意图、不写细节
 
-Seedance 2.0 自带**世界知识**和**导演思维**，能自己编排分镜、选择镜头语言、控制叙事节奏。
+Seedance 2.5 自带**世界知识**和**导演思维**，能自己编排分镜、选择镜头语言、控制叙事节奏。
 
 **黄金法则**（来自即梦官方）：
 1. **精准不模糊**：使用具体关键词如"暖色调柔光""金属细腻光泽"
@@ -325,7 +325,7 @@ Seedance 2.0 自带**世界知识**和**导演思维**，能自己编排分镜�
 【音频参考】@音频:林墨 音色样本.mp3，@音频:混混甲 音色样本.mp3
 ```
 
-> Seedance 2.0 原生支持音视频同步生成（`generate_audio: true`），`audio_files` 参数最多上传3段MP3作为音色参考。
+> Seedance 2.5 原生支持音视频同步生成（`generate_audio: true`），`audio_files` 参数最多上传10段音频（单段≤30s）作为音色参考。
 > 
 > **音频时长限制**：每段音频样本 / 配音示例台词时长 **≤5秒**（短剧快节奏约束）。资产阶段角色配音示例严格控制在 6-7词/3秒内。
 
@@ -379,18 +379,20 @@ Seedance 2.0 自带**世界知识**和**导演思维**，能自己编排分镜�
 
 ## 4. 技术参数
 
-### 4.1 Seedance 2.0 / 即梦
+### 4.1 Seedance 2.5 / 即梦
 
 | 参数 | 规格 |
 |------|------|
 | 画幅 | 9:16 / 16:9 / 4:3 / 3:4 / 1:1 / 21:9 |
-| 时长 | 4-15秒（-1=自动选择） |
-| 分辨率 | 480p/720p/1080p/2K（10s+自动降768P） |
+| 时长 | 4-30秒（-1=自动选择，可多轮延长） |
+| 分辨率 | 仅 480p/720p（⚠️ 2.5 暂不支持 1080p/4K） |
 | 帧率 | 24fps/30fps |
-| 音频 | generate_audio: true（原生音视频同步） |
-| 生成模式 | text-to-video / image-to-video / omni-reference |
+| 音频 | generate_audio: true（原生音视频同步）；audio_files 最多10段（单段≤30s） |
+| 生成模式 | text-to-video / image-to-video / omni-reference / 视频编辑 / 视频延长 / 首尾帧 |
 
-**API关键参数**：model=`doubao-seedance-2-0-260128`, prompt=50-100词, images_list≤9, video_files≤3, duration=4-15s, aspect_ratio=`9:16`, generate_audio=true, watermark=false, service_tier=`default`/`flex`.
+**API关键参数**：model=`doubao-seedance-2-5-260628`, prompt=50-100词, images_list≤30, video_files≤10, audio_files≤10, duration=4-30s（或 -1）, aspect_ratio=`9:16`, generate_audio=true, watermark=false, service_tier=`default`/`flex`.
+
+**⚠️ 2.5 任务类型误判防护**：视频编辑/延长任务 duration 仅 `-1`（不可自定义）、ratio 仅 `adaptive`；首帧/首尾帧任务 ratio 仅 `adaptive`；**文生/参考生视频的 prompt 禁出现"编辑/延长/增加/删除/修改/替换/改成"等词**，否则误判任务类型异步报错 `InvalidParameter.TaskTypeConstraint`（排队后才报，非同步）。
 
 ### 4.2 行业时长标准
 
@@ -509,7 +511,7 @@ output/
 | **video-director** | 视频导演：知识类短视频画面规划与emoji视觉化 |
 | **director-beat-split** | 导演节拍拆分：三幕结构/斯奈节拍器/十维度自审 |
 
-### Seedance 2.0 生态系统
+### Seedance 2.5 生态系统
 
 | 项目 | 说明 | GitHub |
 |------|------|--------|
@@ -521,8 +523,8 @@ output/
 
 | 平台 | 用途 | 链接 |
 |------|------|------|
-| **Seedance 2.0 / 即梦** | 字节跳动AI视频生成 | https://jimeng.jianying.com |
-| **Seedance 2.0 API** | 火山引擎方舟大模型平台API | https://www.volcengine.com/docs/82379/1520757 |
+| **Seedance 2.5 / 即梦** | 字节跳动AI视频生成 | https://jimeng.jianying.com |
+| **Seedance 2.5 API** | 火山引擎方舟大模型平台API | https://www.volcengine.com/docs/82379/1520757 |
 | **RunningHub** | AI视频生成平台 | https://www.runninghub.ai |
 | **抖音创作者平台** | 短剧发布规范 | https://creator.douyin.com |
 | **快手创作者平台** | 短剧发布指南 | https://cp.kuaishou.com |
