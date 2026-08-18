@@ -159,8 +159,10 @@ DSH 报告"完成"只当线索。Hermes 独立验证：
 
 1. **diff 对照范围**：`git diff --stat` 对照任务范围声明，越界改动即 FAIL
 2. **测试/检查**：涉及代码跑测试或语法检查；纯文件任务核对产物清单
-3. **归位**：验收通过 → `git add <产物> && git commit`（中文、单逻辑）→ **有远程的仓库必须 `git push` 到正本**（GitHub 正本才是归档完成；2026-08-19 教训：技能库提交漏 push，远程正本落后 4 个提交）→ 重要结论写回项目文档 → 值得记住的结论 retain 进 Hindsight
+3. **归位**：验收通过 → `git add <产物> && git commit`（中文、单逻辑）→ **有远程的仓库必须 `git push` 到正本**（GitHub 正本才是归档完成）→ 重要结论写回项目文档 → 值得记住的结论 retain 进 Hindsight
 4. **关线程（可选提前收尾）**：`python scripts/dsh_bridge.py close <cwd>`——任务线结束显式关；**不关也安全：TTL 2h 超期自动 close、7 天后自动清理注册表**
+
+**收尾六面以 hermes-workspace-conventions 为唯一本体**（Obsidian/Git/Skill/记忆/污染/DSH close）——本 skill 只列 DSH 相关的归位要点，规范变更改本体、不在本 skill 重复定义（2026-08-19 规范漂移教训：两处各写一份会改一处漏一处）。DSH 会话在 Hermes 工作区干活时，默认遵守工作区 `AGENTS.md` 注入的铁律 + 加载 hermes-workspace-conventions。
 
 **git 唯一写者 = Hermes**：命令里不带 git 操作给 DSH（桥不传 git 任务除非明确要求）。
 
