@@ -5,7 +5,9 @@ description: 绿联 NAS（UGOS/Debian）部署服务完整模式——paramiko S
 
 # 绿联 NAS 部署
 
-用户的绿联 NAS：IP `192.168.1.176`，mDNS 域名 `hmsj.local`（浏览器/日常应用可直接用，详见下文「mDNS 域名访问」节），SSH 用户 HMSJadmin，aarch64，Debian 12，Docker 26 + Compose v2。Web 管理端口 9999。
+用户的绿联 NAS：mDNS 域名 `hmsj.local`（**唯一稳定入口**，DHCP 漂移不影响，详见下文「mDNS 域名访问」节），SSH 用户 HMSJadmin，aarch64，Debian 12，Docker 26 + Compose v2。Web 管理端口 9999。
+
+**⚠️ NAS IP 会 DHCP 漂移**（已知历史：192.168.1.2 → 192.168.1.176 → 192.168.1.2），skill 里不写死任何 IP。需要 IP 时用 `ping hmsj.local` 或 `arp -a` 实时查。
 
 ## 铁律
 
@@ -19,13 +21,13 @@ description: 绿联 NAS（UGOS/Debian）部署服务完整模式——paramiko S
 **正确认知（2026-08-17 用户纠正后定稿）**：`hmsj.local` 一直是通的——浏览器/日常应用解析 `.local` 域名走 **mDNS 组播（UDP 5353）**，Clash TUN 的 fake-ip 劫持的是**系统 DNS 查询**（198.18.0.2），两条路径互不相干。
 
 - **测试工具选择是本次误判的根因**：`nslookup hmsj.local` 走系统 DNS → 返回 fake-ip（198.18.0.220）→ 曾误判「域名被劫持不可用」；而 `Resolve-DnsName hmsj.local` 走 mDNS → 返回真实 IP（192.168.1.176）。**验证 `.local` 域名必须用 `Resolve-DnsName`**，curl 也会踩系统 DNS 的坑。
-- **命令行工具（curl/ssh/脚本）兜底**：hosts 文件加 `192.168.1.176 hmsj.local nas.local`（hosts 优先级高于任何 DNS，绕过 fake-ip）——本机命令行即可稳定用域名。hosts 只对本机生效，其他设备要各自配 hosts 或路由器 DNS。
+- **命令行工具（curl/ssh/脚本）兜底**：hosts 文件加 `<当前NAS IP> hmsj.local nas.local`（hosts 优先级高于任何 DNS，绕过 fake-ip）——本机命令行即可稳定用域名。hosts 只对本机生效，其他设备要各自配 hosts 或路由器 DNS。**NAS 漂 IP 后必须同步改 hosts**（管理员权限编辑 `C:\Windows\System32\drivers\etc\hosts`）。
 - **mDNS 域名天然抗 IP 漂移**：NAS 换 IP 后重新广播 `hmsj.local → 新IP`，局域网设备自动跟随——比写死 IP 更稳，工作站访问优先用域名。
 - **绕不开的例外**：`davinci-pg` 的 compose 端口绑定必须写具体 IP（UGOS 自带 PG 占 127.0.0.1:5432，绑 0.0.0.0 会 EADDRINUSE）——NAS 换 IP 时唯一要手动改的地方。**Resolve 的 .bkey 支持 hostname（2026-08-17 用户 Import Key 实测通过）**——`HMSJ.resolvedbkey` 的 `hostIPAddress` 已正式改为 `hmsj.local`，工作站连库从此免疫 IP 漂移。做法：`nas.py get` 下载 → 本地替换 hostIPAddress → `nas.py put` 覆盖写回 → 读回校验关键字段；测试版先放 `HMSJ-xxx-test.resolvedbkey` 让用户在 Database Manager → Import Key 实测，通过后再覆盖正式版并删测试文件。原文件编辑前先备份思路同上（compose 是 .bak、bkey 是测试版先行）。
 
 ## SSH 连接（paramiko）
 
-本机已配 **SSH 密钥免密**（2026-08-17，ed25519 在 `~/.ssh/id_ed25519`）——CLI `ssh HMSJadmin@192.168.1.176` 直接进，不再弹 Git for Windows 密码框。
+本机已配 **SSH 密钥免密**（2026-08-17，ed25519 在 `~/.ssh/id_ed25519`）——CLI `ssh HMSJadmin@hmsj.local` 直接进，不再弹 Git for Windows 密码框。如 mDNS 不通则用 `ssh HMSJadmin@<实时IP>`。
 
 **密码弹窗坑（2026-08-17 实测）**：Git-bash 的 ssh 在无密钥时用 `SSH_ASKPASS=git-askpass.exe` 弹 GUI 密码框——agent 在 terminal 里跑 `ssh` 命令每连一次弹一次，用户取消则命令挂起超时。**诊断：`~/.ssh` 无密钥对 + `echo $SSH_ASKPASS` 有值。修复：配 ed25519 密钥 → paramiko 推公钥到 `/home/HMSJadmin/.ssh/authorized_keys`。**
 
@@ -35,7 +37,7 @@ description: 绿联 NAS（UGOS/Debian）部署服务完整模式——paramiko S
 import paramiko
 ssh = paramiko.SSHClient()
 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-ssh.connect("192.168.1.176", username="HMSJadmin", password="<向用户要>", timeout=10)
+ssh.connect("hmsj.local", username="HMSJadmin", password="<向用户要>", timeout=10)
 stdin, stdout, stderr = ssh.exec_command("uname -a")
 ```
 
@@ -262,7 +264,7 @@ OpenAI 兼容 `/v1/chat/completions`（无状态，每次请求带完整 message
 
 当用户要求「用知识库评估每个页面/元素，优化 UI 做到尽善尽美」时，流程是一套可复用的流水线：
 
-1. **加载评估基准**：`skill_view 前端设计知识库` 的 6 份 references（UI交互/暗色主题/组件/状态/布局/表单）+ `skill_view impeccable`（23 命令设计审计 skill）。这两个 skill 是权威依据侧（NN/g、Material 3、WCAG 2.2），impeccable 是执行侧。
+1. **加载评估基准**：`skill_view frontend-design-knowledge-base` 的 6 份 references（UI交互/暗色主题/组件/状态/布局/表单）+ `skill_view impeccable`（23 命令设计审计 skill）。这两个 skill 是权威依据侧（NN/g、Material 3、WCAG 2.2），impeccable 是执行侧。
 2. **逐页截图评估**：`python3 -m http.server <port>` 起静态服务（FastAPI 起不来时——hermes venv pydantic 损坏是已知坑），`browser_navigate` + `browser_vision` 逐页截图，每次带具体问题清单（布局/对比度/间距/表单/空状态/AI模板感六维）。
 3. **汇总问题清单**：按全站共有 + 页面特定分类，每条标注对应规范条款（如「WCAG 1.4.11」「NN/g 空状态三件套」）。
 4. **逐项 patch 实施**：在 `<style>` 里改，不动 HTML 结构/JS 逻辑（风险最小）。
@@ -289,7 +291,7 @@ OpenAI 兼容 `/v1/chat/completions`（无状态，每次请求带完整 message
 
 用户要求「用知识库评估每个页面元素、优化到尽善尽美」时的可复用审计流水线——适用于任何已部署的 Web 工具前端：
 
-**前置**：加载评估基准——`skill_view 前端设计知识库` 六份 references（UI交互/暗色主题/组件/状态/布局/表单）+ `skill_view impeccable`（23 命令设计审计）。前端设计知识库管「该按什么标准」（NN/g、Material 3、WCAG 2.2 全带出处），impeccable 管「怎么执行」。
+**前置**：加载评估基准——`skill_view frontend-design-knowledge-base` 六份 references（UI交互/暗色主题/组件/状态/布局/表单）+ `skill_view impeccable`（23 命令设计审计）。前端设计知识库管「该按什么标准」（NN/g、Material 3、WCAG 2.2 全带出处），impeccable 管「怎么执行」。
 
 **五步流水线**：① 加载评估基准 → ② `python3 -m http.server <port>` + `browser_navigate` + `browser_vision` 逐页截图（每页六维评估：布局/对比度/间距/表单/状态/模板感）→ ③ 汇总问题清单（全站共有+页面特定，标注规范条款）→ ④ 在 `<style>` 里 patch（不动 HTML 结构/JS，风险最小）→ ⑤ 部署 + `browser_vision` 真实页面目测验证每项修复可见。
 

@@ -1,5 +1,5 @@
 ---
-name: 电影大师研习
+name: film-master-study
 description: "【土壤层】学大师创作/读名作剧本时用——剧本渠道库(去哪读完整剧本)+三读法(从画面出发学大师手法)。对接AI电影编剧/导演，产出技法卡片。"
 version: 1.0.4
 author: 妖玉

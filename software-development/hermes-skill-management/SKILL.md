@@ -168,7 +168,7 @@ rm -rf "正本/<skill>/references" && /bin/cp -r "$SRC/references" "正本/<skil
 ### 引用方式
 
 ```bash
-skill_view(name='妖玉影视知识库', file_path='references/题材密码/志怪题材密码.md')
+skill_view(name='yaoyu-film-knowledge-base', file_path='references/题材密码/志怪题材密码.md')
 ```
 
 跨 skill 引用完全可用——skill_view 按 skill 名解析，file_path 相对该 skill 目录。引用方 SKILL.md 里写清"正本在 `妖玉影视/_知识库/`，速查表/检索表为索引快照，改内容改正本"。
@@ -338,3 +338,45 @@ cd <主工作区> && git worktree remove C:/tmp/push --force
 ```
 
 **⚠️ 不要 `git reset --soft origin/master` 同步本地 master**：本地 skills 目录含远程没有的大量本地 skill（lark-*、apple、mlops 等整目录），reset 会把它们全部 staged（实测 2000+ 文件）——本地 master 保持原状即可，远程已拿到该拿的提交。
+
+### 用户拍板"本地为准直接覆盖"时的强制安全流程（force push 前必读，2026-08-17 实战）
+
+用户明确同意 force push 覆盖远程时，**绝不能直接 `git push --force`**——远程可能有本地缺失的独有资产，覆盖即永久消失（2026-08-17 实测：远程独有 153 个知识库资产险些被覆盖——ClaudeCode 副本推的导演美学卡片/制作学科/题材密码，本地 git 历史里从来没有，直接覆盖=全丢，先恢复才保住）。
+
+**覆盖前四步（必做）**：
+
+```bash
+# ① 文件清单对比：远程有而本地没有的 = 覆盖后会消失的
+git ls-tree -r --name-only origin/master > /tmp/remote_all.txt
+git ls-tree -r --name-only HEAD > /tmp/local_all.txt
+comm -23 <(sort /tmp/remote_all.txt) <(sort /tmp/local_all.txt)   # ← 这份清单决定生死
+```
+
+② **逐个分类**：本地正本目录（如 `_知识库/references/`）有同名文件的 = 冗余旧副本（覆盖无害）；本地任何位置都没有的 = **真独有资产，先恢复**。批量判断：`find 本地正本目录 -name "<basename>"` 是否命中。
+
+③ **真独有资产恢复进本地再提交**：`git checkout origin/master -- "<path>"` 逐文件（或用 blob hash：`git ls-tree -r origin/master | grep <pattern> | while read m t h p; do git cat-file blob $h > "$DEST/$(basename "$p")"; done`），验证数量对账（`ls | wc -l` 应等于清单数），`git add` + commit。
+
+④ 本地已包含远程全部文件后才执行：`git push --force origin master`，然后 `git fetch origin && git ls-tree -r --name-only origin/master | wc -l` 应与本地一致。
+
+**本地残留副本清理**（工作区 `git status ??` 与远程同名文件）：先忽略空白对比确认一致才能 rm——`diff -w -B <(git show "origin/master:<path>") <path>` 输出 0 行才删。**⚠️ git status 对目录只显示一级路径，脚本 `os.path.isfile` 会漏掉目录内文件**（实测 `?? 制作学科/` 目录下 45 个文件一个没删）——清理目录残留要按目录递归核对，别只信 git status 的行数。
+
+## 中文文件名与 git 的交互坑（Windows/MSYS，2026-08-17 实战）
+
+1. **git 输出中文路径默认转义**（`\346\255\246` 八进制字节序列），`basename`/`grep`/循环全部乱码。先 `git config core.quotepath false`，再 `git ls-tree --name-only` 输出真实中文名
+2. **循环提取中文路径文件用 blob hash 而非路径**：`git show HEAD:"中文路径"` 在 bash 循环里会失败（引号+转义），`git ls-tree <dir> | grep <pattern> | while read mode type hash path; do git cat-file blob "$hash" > dst; done` 稳
+3. **Python subprocess 传中文路径给 git = REMOTE_MISSING 假象**：sandbox/execute_code 里 `git cat-file -e "origin/master:中文路径"` 报找不到，但 bash 里同一路径存在——Python 把字节当转义序列。别用 Python 拼 git 中文路径，用 bash 循环或先落地文件名清单再处理
+4. **清理后检查转义名残留**：批量提取/删除后目录里可能残留"转义数字名 + 真实中文名"两份，`ls | grep -E '\\[0-9]'` 或对比文件名是否含中文段，删掉非中文名版本
+
+## skills 仓库维护（git 卫生，2026-08-17 实测）
+
+Hermes skills 仓库（`AppData/Local/hermes/skills`）是 git 仓库但**运行时会自动改文件**——长期不维护会积攒几百项未提交改动（实测 435 项：206 M + 228 ?? + 遗留 D）。定期维护流程：
+
+1. **先甄别运行时文件（不该提交）**：`.bundled_manifest`（插件哈希清单）、`.curator_state`、`.usage.json`（用量统计）是 Hermes 运行时自动更新的——`git rm --cached` 移出追踪 + 追加 `.gitignore`（`.bundled_manifest\n.curator_state\n.usage.json\n.usage.json.lock`），以后不再污染 status
+2. **分类处理未提交改动**：
+   - `M` 修改：确认是真实工作（SKILL.md 增量/排障记录）→ `git add` 具体文件提交，**不要 `git add -A`**（会混入运行时文件和其他遗留）
+   - `??` 未跟踪：新 skill 目录/新 references → 按目录分组提交（一次一个大分类，commit message 写明是哪个会话的沉淀）
+   - `D` 删除：先查是否历史遗留（`git log --oneline -1 -- <file>` 看最后改动时间），确认是已归档的清理再提交删除
+   - 与远程同名且内容一致（`diff -w -B` 为 0）的未跟踪文件 = 残留副本 → 删除（内容在远程）
+3. **误嵌的嵌套仓库（gitlink）**：`git status` 显示 ` m <dir>`（小写 m = submodule 级改动）且目录内有独立 `.git`——是误嵌入的独立 skill 仓库。`git rm --cached <dir>` 移出追踪（磁盘文件保留），别删目录
+4. **空目录**：git 不追踪空目录，`?? <dir>/` 显示为空壳目录时直接 `rmdir`，不影响仓库
+5. **提交后验证**：`git status --short` 干净 + `git log --oneline -N` 确认提交序列清晰

@@ -1,5 +1,5 @@
 ---
-name: 前端设计知识库
+name: frontend-design-knowledge-base
 description: 前端设计知识库（土壤层）——交互/动效/暗色/布局/组件/表单/状态/无障碍规范速查，全部带权威出处（NN/g/Material/WCAG/Fluent）。做前端工作时必查：设计网页、改UI、组件、布局、分栏、暗色主题、表单、动效、无障碍、前端改版。
 version: 1.0.0
 tags: [前端设计, 知识库, 规范, ui]

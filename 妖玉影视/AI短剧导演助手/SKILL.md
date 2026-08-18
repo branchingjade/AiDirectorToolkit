@@ -1,5 +1,5 @@
 ---
-name: AI短剧导演助手
+name: ai-short-drama-director
 description: "【短剧线】AI短剧导演助手 v14.1.0。制作/执行阶段——以电影导演思维驱动分镜设计。三棵树架构（各自扎根，不保护上游）。导演画面锚点、视点选择、空间权力地理、光作为叙事角色、镜头对碰撞、节奏呼吸与沉默、海报镜头、声音作为第二层叙事。含剧本遵循协议、情绪工程、地基五件套、父-子Agent系统。提示词约束从AI提示词助手同步。"
 version: 14.1.0
 author: 妖玉
@@ -19,7 +19,7 @@ tags: [short-drama, storyboard, ai-prompt, video-generation, seedance, cinematic
 
 ## 知识库先行（分镜前强制 · 六步串联）
 
-分镜前先取知识库（`skill_view(name='妖玉影视知识库', file_path='...')`）——**六步串联管线**（正本：`skill_view(name='妖玉影视知识库', file_path='references/六步串联管线.md')`），顺序不可跳，每步只读需要的、读完要落地：
+分镜前先取知识库（`skill_view(name='yaoyu-film-knowledge-base', file_path='...')`）——**六步串联管线**（正本：`skill_view(name='yaoyu-film-knowledge-base', file_path='references/六步串联管线.md')`），顺序不可跳，每步只读需要的、读完要落地：
 
 1. **定骨架**（继承编剧）：本片题材 → 对应题材密码已由编剧定好（`题材密码/<题材>.md`）——分镜前确认骨架，不重复定
 2. **定招式**：本场属于哪个场景类型（打斗/群像/留白/反转/情感…）→ 查检索表 → 读对应大师技法卡片（读根因，不照抄结构）→ 挑 2-3 个可落地技法

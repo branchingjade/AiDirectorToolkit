@@ -38,7 +38,7 @@ def main():
     cur = conn.cursor()
     # ⚠️ 坑：过滤条件用知识库名（结果 JSON 含 name），不是 'skill_view'（结果里没有该字样）
     cur.execute(
-        "SELECT content FROM messages WHERE role='tool' AND content LIKE '%妖玉影视知识库%' AND timestamp > ?",
+        "SELECT content FROM messages WHERE role='tool' AND content (content LIKE '%妖玉影视知识库%' OR content LIKE '%yaoyu-film-knowledge-base%') AND timestamp > ?",
         (since_ts,),
     )
     rows = cur.fetchall()
@@ -97,7 +97,7 @@ def main():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute(
-        "SELECT content FROM messages WHERE role='tool' AND content LIKE '%妖玉影视知识库%'"
+        "SELECT content FROM messages WHERE role='tool' AND (content LIKE '%妖玉影视知识库%' OR content LIKE '%yaoyu-film-knowledge-base%')"
     )
     all_rows = cur.fetchall()
     conn.close()

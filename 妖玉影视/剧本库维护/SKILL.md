@@ -1,5 +1,5 @@
 ---
-name: 剧本库维护
+name: screenplay-library-maintenance
 description: "【维护层】剧本库建库/维护/质检——抓取剧本转 Obsidian 库的完整流程。触发词：剧本入库、剧本库维护、剧本格式质检、剧本转库。"
 version: 1.0.0
 author: 妖玉

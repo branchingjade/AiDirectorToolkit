@@ -8,7 +8,7 @@ tags: [feishu, lark-cli, image-analysis, character-design, review]
 metadata:
   hermes:
     tags: [feishu, lark-cli, image-analysis, character-design, review]
-    related_skills: [妖玉影视知识库, lark-im]
+    related_skills: [yaoyu-film-knowledge-base, lark-im]
 ---
 
 # 飞书群图分析（取图 + 评审）
@@ -20,7 +20,7 @@ metadata:
 - 飞书会话里用户引用一张图说「分析上面的图片」「这张图怎么样」「阴不阴」「看看这个角色设计」
 - 常见于创作协作群：成员发 AI 生成的角色设计图/分镜参考图，导演/制片让 bot 评审
 - 图片在群里但 bot 拿不到文件时（飞书图片不落本地磁盘）
-- **影视项目群**：评审前按 妖玉影视知识库 主动工作协议加载（导演底色/美学尺子/制作严谨三视角，skill_view(name='妖玉影视知识库')），评审输出用导演语言
+- **影视项目群**：评审前按 妖玉影视知识库 主动工作协议加载（导演底色/美学尺子/制作严谨三视角，skill_view(name='yaoyu-film-knowledge-base')），评审输出用导演语言
 
 ## 核心事实（先记住，别白找）
 

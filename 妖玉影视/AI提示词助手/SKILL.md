@@ -1,5 +1,5 @@
 ---
-name: AI提示词助手
+name: ai-prompt-assistant
 description: "【泛用工具】AI提示词助手 v1.6.0。Seedance 2.5 提示词写作约束的主本（canonical source）。AI短剧导演助手和AI短剧编剧助手的提示词约束均从此同步。将用户提供的剧情描述/剧本片段/小说段落转化为可直接用于Seedance 2.5生成的影视级提示词。仅含提示词写作约束+动作设计，不含完整分镜产出流程。Trigger: 优化提示词/改写提示词/润色提示词"
 version: 1.6.0
 tags: [seedance, prompt-optimizer, video-generation, cinematic, canonical-constraints]
@@ -19,7 +19,7 @@ tags: [seedance, prompt-optimizer, video-generation, cinematic, canonical-constr
 
 **本 Skill 与 AI电影编剧/AI短剧编剧助手/AI短剧导演助手 共用同一片土壤——`妖玉影视/_知识库/`（skill 名：妖玉影视知识库），知识库美学与经验贯穿所有创作。** 提示词是画面落地前的最后一道门——编剧/导演从知识库取的招式，提示词要替它们兑现。
 
-优化提示词前（`skill_view(name='妖玉影视知识库', file_path='...')`）——**六步串联管线**（正本：`skill_view(name='妖玉影视知识库', file_path='references/六步串联管线.md')`），提示词是第⑥落地步，前五步成果要在此兑现：
+优化提示词前（`skill_view(name='yaoyu-film-knowledge-base', file_path='...')`）——**六步串联管线**（正本：`skill_view(name='yaoyu-film-knowledge-base', file_path='references/六步串联管线.md')`），提示词是第⑥落地步，前五步成果要在此兑现：
 1. **①定骨架**（继承）：本段素材的题材密码已由编剧/导演定好——提示词不重复定，确认题材调性（志怪=执念/武侠=江湖…）约束语气
 2. **②定招式**：判断本段素材的场景类型（打斗/情感/妖异类/留白/反转…）→ 查检索表 → 读对应大师技法卡片
 3. **③定风格**（边缘）：本段的作者语气 → 查导演卡（如有）——导演语法翻译成运镜约束（快剪/长镜/留白/对称…）
