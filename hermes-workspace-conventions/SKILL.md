@@ -148,7 +148,7 @@ scope = 影响范围（日志|图谱|知识库|规范|自检|飞书|犬子无双
 收尾：
 - [ ] Obsidian笔记（有值得记录的学习 → 主动提出）
 - [ ] Skill同步（方法论/工具用法变了 → 更新对应skill）
-- [ ] Git push（KnowledgeBase有变更 → commit+push）
+- [ ] Git push（**KnowledgeBase/技能库有变更 → commit+push 到对应正本远程**：vault → Obsidian 仓库，skills → AiDirectorToolkit；只 commit 不 push = 收尾未完成，2026-08-19 教训）
 - [ ] 记忆同步（memory.md → vault Hermes运维/memory/）
 - [ ] 悬空wikilink检查
 - [ ] 污染检查（memory/skill/Obsidian/cron 四个面：memory用分类克制门禁逐条过；skill扫重复/冲突/过时；Obsidian扫垃圾笔记；cron扫废弃job）
@@ -590,13 +590,13 @@ User Profile 是**徐学环本人的画像**，不是所有偏好的收纳箱。
 
 ### Skill 同步铁律
 
-任何约定/标准/流程变更后，必须同步更新对应 skill + 推送至 `AiDirectorToolkit`（正本仓库）。注意：`hermes-skills` 仓库已删除，唯一远端是 `AiDirectorToolkit`。
+任何约定/标准/流程变更后，必须同步更新对应 skill + **推送至 `AiDirectorToolkit`（正本仓库）**——commit 不算归档，**push 到 GitHub 正本才算**（2026-08-19 教训：拉齐提交漏 push，正本落后）。注意：`hermes-skills` 仓库已删除，唯一远端是 `AiDirectorToolkit`。
 
 ### 技能库命名与副本清理
 
 技能库在 `~/AppData/Local/hermes/skills/`，是一个 git 仓库（`https://github.com/branchingjade/AiDirectorToolkit`），追踪 `妖玉影视/` 核心创作套件（知识库+三棵树）及 100+ 其他分类 skill。加载时用 `妖玉影视/AI短剧编剧助手` 路径，不加前缀会因其他同名技能产生歧义。
 
-**命名铁律**：目录名 = skill name（中文），二者一致。所有英文名目录（`ai-screenwriter-assistant/`、`ai-prompt-assistant/`、`ai-short-drama-assistant/`）和 `ai-skills/` 子目录是旧版残留，不在 git 追踪中——见到直接删。
+**命名铁律（2026-08-19 拉齐后更新）**：**frontmatter `name` 必须英文 kebab-case**（`^[a-z0-9]+(?:-[a-z0-9]+)*$`）——DSH 侧 `isSkillName` 硬校验，中文/大写/下划线名会被**静默忽略**（DSH 看不到技能）；中文名只放 `description`/正文标题。**目录名可以保留中文**（如 `妖玉影视/AI电影编剧/`），路径不影响 DSH 发现。历史教训：9 个中文 name 技能（AI电影编剧/AI短剧编剧助手/AI提示词助手等）曾整库在 DSH 不可见，2026-08-19 已改英文名并同步引用。**旧版残留判别**：英文名**目录**（`ai-screenwriter-assistant/`、`ai-prompt-assistant/`、`ai-short-drama-assistant/`）和 `ai-skills/` 子目录是旧版残留，不在 git 追踪中——见到直接删（注意与「英文 frontmatter name」区分：残留是目录名，不是 SKILL.md 里的 name 字段）。
 
 **歧义排查流程**：加载技能时报 "Ambiguous skill name" → 不要猜，跑以下三步：
 
