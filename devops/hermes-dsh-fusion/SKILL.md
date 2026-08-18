@@ -166,6 +166,20 @@ DSH 报告"完成"只当线索。Hermes 独立验证：
 
 **git 唯一写者 = Hermes**：命令里不带 git 操作给 DSH（桥不传 git 任务除非明确要求）。
 
+## DSH 直接会话的收尾三件套（用户直接在 DSH web 指挥，非桥投递）
+
+桥投递的任务由 Hermes 验收归位（见上节）。但**用户直接打开 DSH web 会话发任务**时（无桥，轨迹不自动回流 Hermes），DSH 会话自己承担收尾——结果必须**主动落到 Hermes 侧**，对话里说完不算（Hermes 看不到）。2026-08-19 用户质疑「hermes侧返回的结果呢」后固化：
+
+1. **git commit + push 正本**：有远程的仓库（技能库 → AiDirectorToolkit）commit 后必须 push，只 commit 不算归档
+2. **Obsidian 日志**：写当日日志 `日志/<年-月>/W<周>/<日期>.md`（frontmatter tags/date/related + 主题小节），记录任务/根因/修复/提交号
+3. **Hindsight retain**（Hermes 记忆层，recall 可达）：
+   - `POST http://localhost:9177/v1/default/banks/hermes/memories`，body `{"items": [{"content": "<结论>", "tags": ["DSH", ...]}]}`
+   - item 字段是 **`content`**（不是 text）；**超时给足 120s+**（首次嵌入计算慢，20s 必超时）
+   - 验证：`python scripts/dsh_bridge.py util hindsight recall "<关键词>" --limit 3` 能命中
+   - ⚠️ hindsight daemon 空闲自动停（idle-timeout）：retain 报不可达时先让 Hermes 跑一次 retain/recall 拉起 daemon 再重试
+
+顺序做完三件套才算任务完成（对照工作区 AGENTS.md 铁律 + hermes-workspace-conventions 收尾六面）。
+
 ## 会话管理（活跃线程 + 路由键，内部机制，用户无感）
 
 **心智模型：默认续、显式断、按任务线路由。**
