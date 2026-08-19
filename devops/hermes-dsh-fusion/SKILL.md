@@ -2,7 +2,7 @@
 name: hermes-dsh-fusion
 description: DSH×Hermes 无缝融合——DSH 是 Hermes 默认执行引擎（本机 127.0.0.1:8080）。全部场景默认走 DSH：工程执行/创作推敲/协作起草/渠道辅助/调研分析/插件评估，Hermes 管渠道工具最终执行。触发：DSH、bridge、融合、降级、轨迹回流、反向通道、events.mux、dsh-inbox 插件、mux-token。
 whenToUse: 默认加载——收到任务先考虑是否走 DSH 引擎（除渠道工具最终执行/简单问答外）；用户未指定即按默认走 DSH。决策由 Hermes（agent）判断，桥（代码）执行。
-version: 2.3.0
+version: 2.3.1
 author: Hermes Agent
 license: MIT
 metadata:
@@ -422,6 +422,8 @@ registry 文件：`.hermes/dsh-registry.json`（`list` 可查投递/复用统计
 **插件位置**：`C:\Users\HMSJ\AppData\Local\hermes\desktop-plugins\dsh-inbox\plugin.js`（约 19500 字节，纯前端 ESM）
 
 **启用方式**：Hermes 桌面 app 里 ⌘K → "Reload desktop plugins"（或等自动热加载）；titleBar 右上角出现 dsh-inbox 图标 + ⌘K "DSH Inbox" 调色板命令
+
+**⚠️ reload 不是可选项**：`controller.tsx` 启动时只调 `discoverBundledPlugins()`（扫 `src/plugins/` 内置插件），**`desktop-plugins/` 目录里的 runtime 插件需要 ⌘K → "Reload desktop plugins" 才会被 `discoverRuntimePlugins()` 扫到**。新插件写完到 desktop-plugins/ 后**没 reload 就不会出现**——日志里看不到任何 plugin 加载错误（因为根本没尝试加载），用户只会看到"插件不存在"的错觉。**症状识别**：desktop.log 里看到 dsh-inbox **零行日志** + reload 后立即有 log → 是这个原因。修复：⌘K → 搜 "Reload desktop plugins" → 回车。
 
 **v1.0 弃用**：`scripts/dsh_inbox_watcher.py` + `dsh_inbox_reply.py`（cron 轮询 + 飞书推送）—— 保留作为**兜底**（Hermes 桌面未运行 / 插件故障时）。
 

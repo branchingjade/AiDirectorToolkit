@@ -1,7 +1,7 @@
 ---
 name: hermes-desktop-plugin-dev
-description: "Hermes 桌面插件开发实战（本机验证的架构与坑）。触发词：桌面插件、desktop plugin。"
-version: 1.0.0
+description: "Hermes 桌面插件开发实战（本机验证的架构与坑）。触发词：桌面插件、desktop plugin、PluginContext、require fs、mux-token、dsh-inbox、render process、Electron sandbox。"
+version: 1.1.0
 tags: [hermes, desktop, plugin, development]
 ---
 
@@ -183,6 +183,30 @@ desktop.log 有错误 ≠ 当前有 bug。判定顺序：
 
 - 本机完整示例：`~/AppData/Local/hermes/plugins/channel-sessions/`（后端：读 state.db + 真名反查 + 管理操作 + /messages 消息读取）和 `~/AppData/Local/hermes/desktop-plugins/channel-sessions/plugin.js`（前端 v1.3：三栏布局 筛选|列表|详情 + 多条件组合筛选 + UI 状态记忆 + 消息分角色渲染与折叠展开 + 主流平台对象识别；`node -e` 提取纯函数做冒烟测试的样板）。
 - 官方参照：`~/AppData/Local/hermes/plugins/skill-manager/`（完整 Python 后端结构）和 `~/AppData/Local/hermes/desktop-plugins/skill-manager/plugin.js`（成熟前端模式）。
+
+## Runtime 插件 reload 不对称（2026-08-19 实测教训，必看）
+
+`controller.tsx` 启动时只调 `discoverBundledPlugins()`（扫 `apps/desktop/src/plugins/` 内置插件）——**`desktop-plugins/<name>/plugin.js` 里的 runtime 插件不会自动被发现**。新写完一个 runtime 插件后**必须** ⌘K → "Reload desktop plugins" 触发 `discoverRuntimePlugins()`，否则：
+
+- **desktop.log 里看到新插件 0 行日志**（因为根本没尝试加载）
+- 用户看不到任何 toast/图标/错误提示
+- 排查会走到死路：plugin.js 语法对、node --check 通过、cwd 对、mux-token 对、握手也能复现，但**就是没出现在 app 里**——因为 app 没扫这个文件
+
+**症状 → 病因 → 修复表**：
+
+| 症状 | 病因 | 修复 |
+|---|---|---|
+| 写完 plugin.js 重启 app，titleBar 仍无图标 | `discoverBundledPlugins()` 没扫 `desktop-plugins/` | ⌘K → "Reload desktop plugins" |
+| desktop.log 完全没出现新 plugin 的 log | 同上 | 同上 |
+| reload 后立即出现 log 但仍报错 | 真 bug | 查 host/ctx 用法 |
+| reload 后图标出现但**点不动/状态不对** | 状态同步问题 | `useValue` 在最里层组件订阅 |
+
+**热加载（已加载后改文件）vs 冷加载（首次 reload）的陷阱**：
+- **热加载有缓存掩盖**——改 plugin.js 后 5s 内自动 reload（runtime-loader.ts: readFileText → rewriteSpecifiers → Blob+import()），但**它只覆盖前端 plugin.js**；新增插件**必须**显式 reload
+- **冷加载（首次 reload）才暴露真问题**——completion-sound 错误（dsh-integration-pattern.md 里有）只出现在冷加载路径，热加载路径看不见
+- **判断"插件是否健康"必须** reload 一次（不仅靠热加载通过）
+
+**为什么 bundled skill 没说**：`hermes-desktop-plugins` SKILL.md 写 "the app watches that directory: the plugin loads within a few seconds"——**这句话对内置插件（bundled）成立，对 runtime 插件不成立**。bundled 在 `apps/desktop/src/plugins/` 里，启动时和 HMR 一起被 `discoverBundledPlugins` 处理；runtime 在 `desktop-plugins/`，启动时被忽略，只在 reload 路径被扫。
 
 ## 用户偏好（本机）
 

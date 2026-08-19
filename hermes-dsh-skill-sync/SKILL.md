@@ -19,8 +19,8 @@ metadata:
 - **DSH 直连**：`C:\Users\HMSJ\.dsh\skills` 是 **junction** → Hermes 正本（2026-08-19 晚用户拍板「DSH 不存副本，是直连 Hermes 技能库才对」，从 v2 实体副本改回）。**单实体、零同步**——Hermes 侧改技能 DSH 即热生效。
 - 热生效原理：DSH skill-filesystem `watchFollowSymlinks` 默认 true（chokidar 跟随 junction），Hermes 侧增/改/删 skill 自动触发 DSH 技能刷新，**无需手动 robocopy、无需重启 DSH**。
 - junction 暴露的运行时目录（`.git`/`.hub`/`.curator_backups`/`.archive`）无直接 `SKILL.md`，`discoverRoot` 扫描时静默跳过——**不会误载入归档技能**（已读源码验证 `packages/skill/skill-filesystem/src/index.ts`）。
-- DSH 通过 `customSkillDirs`（机器级 `~/.dsh/cordis.patch.yml`）读取**分类子目录**（devops、scriptwriting、妖玉影视、film-production、post-production、lark 等），使二级 skill 可发现（路径经 junction 透传）。
-- DSH 默认 preset = `creator`（cordis 副本 + 上述二级目录），新会话生效。
+- DSH 通过 `customSkillDirs` 读取**分类子目录**（devops、scriptwriting、妖玉影视、film-production、post-production、lark 等），使二级 skill 可发现（路径经 junction 透传）。**⚠️ 生效点分层（2026-08-19 修复）**：web-app bundle 将 host 层 skill-filesystem 设为 `disabled: true`（presets own local discovery）——机器级 `~/.dsh/cordis.patch.yml` 的 customSkillDirs 挂在 host 行上 **对 web profile 不生效**（分类二级技能缺失的根因，8-19 验收只看文件系统透传漏检）。真正生效点 = **creator preset 层**（`~/.dsh/.agent-presets/creator/agent.cordis.yml` 的 skill-filesystem customSkillDirs，与 cordis.patch.yml 清单一致，两处需同步维护）。headless profile 无 agent-presets 插件、host 层未被禁用，走机器级 patch 即可。
+- DSH 默认 preset = `creator`（cordis 副本 + 上述二级目录），新会话生效。preset 文件用 `compositionStamp`（mtime）检测变化——**改 preset 后新会话自动重载，无需重启 DSH**。
 - 技能格式两侧一致（`SKILL.md` + YAML frontmatter，必需 `name`/`description`），无需转换。
 
 ## 写 skill 约定
@@ -41,7 +41,7 @@ metadata:
 - Hermes 的 `sync-external-skills.py` 会**整目录替换**同步分类（如 mattpocock 系）——手写 skill 放一级位置或非同步分类，别放进会被覆盖的目录。
 - `skills.disabled` 名单（Hermes config.yaml）只在 Hermes 侧生效，不影响 DSH 加载。
 - 删除 skill：只删 Hermes 正本（junction 透传，DSH 侧自动消失），无需再删副本。
-- v2 遗留：实体副本备份 `~/.dsh/skills-entity-bak`（2026-08-19 切换时保留，验证稳定后删除）。**不要**把它当 DSH 技能库用。
+- v2 遗留：实体副本备份 `~/.dsh/skills-entity-bak`（2026-08-19 切换时保留，验证稳定后删除）。**不要**把它当 DSH 技能库用。**（已删 2026-08-19 夜，junction 稳定验证通过）**
 
 ## 验收
 
