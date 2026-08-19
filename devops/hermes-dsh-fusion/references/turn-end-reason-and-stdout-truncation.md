@@ -191,7 +191,160 @@ DSH schema `TurnEndReasonMap` 是 merge-extensible（types.ts 注释：plugins e
 2. `python scripts/test_dsh_bridge_p0_e2e.py` 退出码 0（端到端）
 3. 派一单 hello 级任务，看 BRIDGE_RESULT 末尾 JSON 含 `turnEndReason=completed`
 
+
+
 ---
+
+## §坑 20 · F3 turnEndError 细分透传（2026-08-19 落地）
+
+**为什么需要**：§17 决策树要求 `error` 状态区分"瞬时"（重试）和"结构性"（上报）——但 DSH `reason.error` 携带 `code`（`RATE_LIMIT` / `AUTH_FAILED` / `NO_ADAPTER` 等 LlmFailure 共享分类法）和 `status`（HTTP 状态码）。**旧实现把这些都丢了**——`error` 字符串一刀切，验收端无法决断。
+
+**桥改法**（`scripts/dsh_bridge.py`，F3 修复）：
+
+- `_turn_end_error(event)`：从 `data.reason.error` 提取 `code`（str）/ `status`（int）/ `retryable`（bool），缺失字段跳过
+- `run_task` 轮询：`end_error` 与 `end_kind` 同步提取（取首个 turn/end）
+- `_finish/_emit`：加 `turn_end_error` 参数 + 透传到 BRIDGE_RESULT（仅 error 状态有值）
+- _emit `status == STATUS_ERROR` 分支人读文案：`回合失败（reason.kind=error, code={code}）` —— code 可读
+
+**BRIDGE_RESULT 新增字段**：`turnEndError`（仅 reason.kind=error 且事件含 error 字段时存在）
+
+```python
+# 验收端用法
+br = json.loads(stdout['BRIDGE_RESULT {...}'])
+if br.get('turnEndError', {}).get('retryable'):
+    retry()  # 瞬时错（rate_limit / busy / network）
+else:
+    raise PermanentError(br['turnEndError'])  # 结构性错（auth_failed / no_adapter）
+```
+
+**实测**：`reason.kind=error + error.code=RATE_LIMIT + status=429 + retryable=true` →
+```
+BRIDGE_RESULT {..., "turnEndReason": "error",
+                     "turnEndError": {"code": "RATE_LIMIT", "status": 429, "retryable": true}}
+```
+
+---
+
+## §坑 21 · Hermes 端验收 gate = verify_bridge_result.py（2026-08-19 落地）
+
+**为什么需要**：§17 验收契约（"Hermes 端验收 gate 必须独立于 BRIDGE_RESULT"）原本只是 skill 文本规则，靠 LLM 每次读 skill 行为执行——**非程序化保证**。**verify_bridge_result.py** 把这套规则沉淀为可执行脚本 + 11 项单测。
+
+**三状态机**（最重要的设计——不是两态）：
+
+| 状态 | 触发条件 | 退出码 | 含义 |
+|---|---|---|---|
+| `verified` | status=done + turnEndReason=completed + 物理文件三件套通过（或未指定 artifact）| 0 | 可交付 |
+| `verified_failed` | 任何 errors（status 非 done/timeout / turnEndReason 非 completed / 文件检查失败）| 2 | 抢救到 partial/，不当交付物 |
+| **`pending`** | status=timeout **或** 旧产物（无 turnEndReason 字段）**或** DSH 升级未知名 kind + 文件三件套通过 | 3 | **需人工审查**——不直接 fail |
+
+**为什么要有 pending 第三态**：
+- `status=timeout` 可能只是 DSH 还在跑或桥轮询到 deadline——**不能直接判 fail**
+- 旧产物（修复前生成）没有 `turnEndReason` 字段——**直接 fail 会让历史日志全部失效**——但也不能直接 pass——**人工审查兜底**
+- DSH 升级添加新 kind——桥 `.get(unknown, STATUS_ERROR)` 兜底成 error，但**升级保护**要 pending 让人类看一眼
+
+**物理文件三件套**（独立于 BRIDGE_RESULT）：
+
+1. **路径存在**（os.path.getsize 不抛 FileNotFoundError）
+2. **字节数 ≥ 契约下限**（`--min-bytes`，未指定则跳过）
+3. **sentinel 清单 grep 命中**（`--sentinel` 可多次指定，未指定则跳过）
+
+**turnEndReason 兜底逻辑**（DSH 升级保护）：
+
+```python
+KNOWN_REASONS = {"completed", "aborted", "blocked", "error", "max-tokens", "interrupted"}
+reason = br.get("turnEndReason")
+if reason is None:
+    # 旧产物 / 字段缺失 → pending 兜底
+elif reason not in KNOWN_REASONS:
+    # DSH 升级未知 kind → pending 兜底
+elif reason != "completed":
+    # 已知但非 completed → verified_failed + 提示抢救到 partial/
+```
+
+**用法**：
+
+```bash
+# 命令行
+python scripts/verify_bridge_result.py '<br_json>' \
+    --artifact path/to/product.md \
+    --min-bytes 5000 \
+    --sentinel '关键内容' \
+    --sentinel '另一关键内容' \
+    --json
+
+# stdin
+echo '{"status":"done","turnEndReason":"completed",...}' \
+    | python scripts/verify_bridge_result.py --artifact p.md --json
+
+# 11 项单测
+python scripts/test_verify_bridge_result.py  # 退出码 0 = 全过
+```
+
+**调用时机**（Hermes 端默认行为）：DSH 任务走桥 `run` 完成后，Hermes 跑 verify_bridge_result.py 验证（如需）。**作为 CLI 工具单独用**——不是桥的一部分，**DSH 不知道**它的存在。
+
+**DSH 升级保护完整套**（§17 / §20 / §21 组合）：
+
+```
+DSH 升级后跑：
+  1. python scripts/test_dsh_bridge_p0.py          # 纯函数 18 项
+  2. python scripts/test_dsh_bridge_p0_e2e.py       # 端到端 7 项
+  3. python scripts/test_verify_bridge_result.py   # 验收 gate 11 项
+  4. 派一单 hello 级任务，看 BRIDGE_RESULT 末尾 JSON：
+     - 含 turnEndReason=completed（§17 新增字段）
+     - 若 error 状态含 turnEndError={code,status,retryable}（§20 新增字段）
+  5. 跑 verify_bridge_result.py 验证 hello 任务的产物（§21 三状态机）
+```
+
+---
+
+## §坑 22 · 单一任务书三层契约（2026-08-19 沉淀）
+
+DSH 任务书要同时表达**三层契约**，Hermes 验证只看这三层：
+
+```
+【契约 1】产物层
+  - 产物路径（Hermes 注入，不让 DSH 选）
+  - 最小字节数（防 DSH 偷懒写半截）
+  - sentinel 文本清单（防 DSH 删关键词）
+
+【契约 2】时机层
+  - 何时必须重做（status=aborted/interrupted/error/blocked）
+  - 何时可以续投（status=timeout + 文件齐）
+  - 何时直接交付（status=done + turnEndReason=completed + 文件齐）
+
+【契约 3】守卫层
+  - 12 条硬规则（坌子型 / 通用型）逐条不能破
+  - 三处拍板 / 锁定项必须保留
+  - 知识库招式的"边界句"——什么能引用、什么不能照抄
+```
+
+**为什么需要**：单契约（只说"做完"、"完成"、"对"）= DSH 自由发挥空间大 = 容易复发 P0 类事故（删词、超界、误解）。三层契约 = 静态产物 + 动态时机 + 守卫约束 = 验收可程序化。
+
+**写任务书时落地姿势**（Hermes 装任务文本模板）：
+
+```markdown
+【背景】<项目 + 上一版诊断 + 本次只许删 X 不许动 Y>
+
+【任务】<具体任务>
+
+【产物契约】
+- 路径：cwd/.hermes_dsh/<route>.md（固定名，DSH 覆盖）
+- 最小字节：5000
+- 必含 sentinel：["关键内容 A", "关键内容 B"]
+- 关键不可删词：["水光反衬", "重半分", "下颌线绷紧"]
+
+【时机契约】
+- 续投条件：status=timeout 且文件齐 → pending 人工审
+- 重做条件：status=aborted/interrupted → 续投一次失败则 force_new
+- 上报条件：status=error 且 sentinel 缺席 → 不重试
+
+【守卫契约】
+- 硬规则 12 条（编号）
+- 锁定项：[白眯眼 B 路 / 萧耳朵红保留 / 林我爸不补]
+- 知识库招式边界：哪条引用 / 哪条不能照抄
+```
+
+**Hermes 收到产物后**先跑 `verify_bridge_result.py` 走三状态机——pass 才接产物；fail 直接报错给用户（不静默让 DSH 改）。---
 
 ## 文档行号漂移警告
 
