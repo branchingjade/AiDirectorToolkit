@@ -322,7 +322,7 @@ SOUL.md = agent 核心人格，只写「我是谁、怎么做事」。禁止写�
 **git vs Obsidian 分工**（本机铁律，不要漂移）：
 - **git = 工作区自身的版本历史 + 代码资产**（可以重建的代码/skill/script）
 - **Obsidian = 跨工作区的事实归档 + 引用证据 + 笔记**（不可重建的会议纪要、对话录音、Obsidian 图谱、跨工作区参考资料）
-- skill 文件 = 双侧共享，DSH 侧是 robocopy 实体副本；两侧都要维护或单源 → 镜像
+- skill 文件 = 双侧共享，DSH 侧是 junction 直连 Hermes 正本（`~/.dsh/skills` → `%LOCALAPPDATA%\hermes\skills`，2026-08-19 晚拍板，单实体零同步）；单源维护，Hermes 正本改技能 DSH 热生效
 - 记忆档案（MEMORY/USER/画像）= Obsidian 唯一源（git 不会进）
 - 飞书评论会话 = Obsidian 唯一源（git 不会进）
 
