@@ -1,7 +1,7 @@
 ---
 name: deepseek-harness-ops
 description: "DSH 本机操作：headless 调用、状态检查、key 定位。触发词：DSH。"
-version: 1.3.0
+version: 1.4.0
 author: Hermes Agent
 license: MIT
 platforms: [windows]
@@ -143,6 +143,24 @@ llm-fallback:
 **重启生效**：插件改动需重启 DSH（`taskkill /F /PID <pid>` + 重新启动 web）。
 
 技术细节（settings API、依赖、bundle 注册位置）见 `references/dsh-fallback-plugin.md`。
+
+## ⚠️ Windows 弹终端根治（windowsHide，2026-08-19 实测）
+
+现象：DSH 每次执行命令弹出黑色控制台窗口。根因：`packages/subprocess/subprocess-local/src/spawn.ts` 的 spawn 漏了 `windowsHide: true`（官方 native-command / directory-picker-native 等其它 spawn 点都有，仅此处漏）。Windows 上无控制台父进程 spawn 控制台程序（pwsh.exe）时默认新建可见控制台窗口。
+
+修复：源码 spawn options 加 `windowsHide: true`。**坑**：DSH 用 tsx 跑源码（tsconfig paths 解析到 `packages/*/src`），patch npm 部署产物（`~/.dsh/profiles/node_modules/@deepseek-ai/...`）**不生效**——必须 patch `packages/.../src/*.ts` 源码。升级会覆盖补丁，需重打，值得给官方提 PR。
+
+## 插件安装（pnpm 11 供应链策略连环坑，2026-08-19 实测）
+
+`dsh plugin --profile web add github:<owner>/<repo>` 是 pnpm 薄转发，pnpm 11.6 默认策略会连环拦：
+
+1. **`minimumReleaseAge` 是顶层字段**（默认 1440 分钟 = 24h 发布冷却期，**不是** `supplyChainSecurity` 子字段）——刚发布的包报 `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION` → `pnpm-workspace.yaml` 加 `minimumReleaseAge: 0`（本机 registry 即信任边界）
+2. **git-hosted 插件 prepare 脚本需 `allowBuilds` 白名单**，key 必须带完整 git URL（报错会打印确切 key）：`allowBuilds: { '<pkg>@https://codeload.github.com/<owner>/<repo>/tar.gz/<sha>': true }`——裸包名不行
+3. **原生依赖构建**（如 better-sidebar 的 `node-pty@1.1.0`）：`allowBuilds: { 'node-pty': true }`，重跑后 postinstall 拷贝 conpty.dll / OpenConsole.exe 才就位
+
+装完验证：`dependencies` + `dsh.profile.bundles` 各多一条；`node apps/cli/src/bin.ts --profile web --dump-config | grep <插件名>` 组合树在位。重启后插件路由存活证据：请求插件 API 返回 **405（路径在）而非 404**（如 better-sidebar 的 `/sidebar/api`）。
+
+已装实例：`dsh-better-sidebar@0.13.1`（github:omdsh-dev/DSH-better-sidebar，★2302，peer 对齐 rc.7）——侧边栏/底部双工作台：真实终端（node-pty + xterm.js）、文件、Git、内嵌浏览器。
 
 ## DSH 插件开发模式
 
