@@ -42,6 +42,7 @@
 | 画像留空成员多 | 成员名单有但画像无观察 | 正常（无观察不编造），非缺陷 |
 | 项目记忆为空 | ~~目录只有 README~~ | **已废弃（2026-08-08）**：项目记忆迁移 Hindsight，脚本不再检查、不再误报 |
 | 沉淀停更 | 画像 updated 字段陈旧 | 查 gateway 是否运行、OBSERVATION 钩子是否被 hermes update 覆盖（画像沉淀保留，仅项目记忆已停） |
+| 评论工具报「Feishu client not available」 | bot 在评论里回复文档工具全部不可用（`code=-1 msg=Feishu client not available (not in a Feishu comment context)`） | 不是上下文/参数问题——是 client 注入线程问题（见修复层「工具 client 注入」），2026-08-19 已修复为进程级全局，复发时先查该修复是否被 hermes update 覆盖 |
 
 ## 输出格式
 
@@ -116,6 +117,16 @@ python3 ~/AppData/Local/hermes/scripts/feishu-collab-health.py [hours]  # 默认
 ### 每日摘要 cron 补评论通道
 
 每日摘要 cron（88ab7ff66681）原只查 IM（feishu-daily-digest.py 查 sessions 表），评论通道活动永远进不了摘要。修复：prompt 增加步骤 2——用 Python 读 `_hermes/评论会话/comment_*.json` 的 last_access 过滤近 24h 线程，纳入摘要（发言人标 `[评论:真名]`）；评论线程内容直接读 json 文件，不用 session_search。
+
+### 评论工具 client 不可用：thread-local 注入跨线程丢失（2026-08-19 修复）
+
+**现象**：用户在文档评论 @ bot 要求改文档（表格→有序列表等），bot 连续多轮回复工具不可用，报 `Feishu client not available (not in a Feishu comment context)`。曾误判为"评论上下文没给富文本客户端"，甚至建议用户改走文档正文 @（方向反了——文档正文 @ 走 IM 路径根本不注入 client，评论路径才是唯一注入路径）。
+
+**根因**：`tools/feishu_doc_tool.py` / `tools/feishu_drive_tool.py` 用 `threading.local()` 存 lark client，由 `_run_comment_agent`（feishu_comment.py）注入；但工具 handler 由 `agent/tool_executor.py` 的 **ThreadPoolExecutor worker 线程**执行（run_agent.py 注释明说 "workers run tools on their own tids"）。注入线程 ≠ 执行线程，thread-local 必然取不到 → 系统性失败，与用户操作/参数无关。
+
+**修复**：两文件注入机制改为**进程级全局 + 锁 + 引用计数**——`set_client(client)` 计数 +1，`set_client(None)` 减 1，归零才清空；并发评论会话互不干扰。同一 bot 的租户级 client 进程内共享无害。
+
+**判据/验证**：本地脚本三场景（① 跨线程能拿到 client ② 并发 A 结束 B 保留、全部结束清空 ③ 反复进出归零）PASS；`py_compile` 通过；改完需 `hermes gateway restart` 生效；补丁备份 `scripts/patches/hermes-local-patches.diff` 同步重生成（防 hermes update 覆盖——复发时先查这两个文件的注入代码是否被还原成 thread-local）。
 
 ### 索引文件名并行改名坑（2026-08-07 实测）
 
