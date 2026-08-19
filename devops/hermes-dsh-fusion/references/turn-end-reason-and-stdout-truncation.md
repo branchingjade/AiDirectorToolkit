@@ -253,12 +253,12 @@ route：verify-p0-fix
 
 **未实测分支**：`aborted` / `interrupted` / `blocked` / `max_tokens` 四个状态需要 DSH 真正触发这些 turn/end 才能验——mock 注入事件是最稳妥的覆盖测试路径（参见下方验证脚本）。
 
-### 验证脚本（`scripts/verify-turn-end-reason.py`）
+### 验证脚本（`scripts/test_dsh_bridge_p0.py`）
 
-不动桥代码，单测式验证映射完整性。覆盖 6 个 kind 值（含 `disposed`）和缺失/非字符串 reason 的兜底分支。Python 单元测试，无外部依赖。
+不动桥代码，单测式验证 P0 修复：`_turn_end_kind()` 提取 10 个用例（6 个 kind + reason 缺失 / reason 非 dict / kind 缺失 / kind 非字符串）+ `_TURN_END_KIND_TO_STATUS` 映射 8 个断言（6 已知 kind + unknown/None 走 error）+ 6 个状态常量存在性。Python 单元测试，无外部依赖，直接 import 真实 `dsh_bridge` 模块。注意：`disposed` 不是 turn/end kind（是 aborted 的子原因），不在值域内。
 
 ```python
-# 用法：python scripts/verify-turn-end-reason.py
+# 用法：python scripts/test_dsh_bridge_p0.py
 # 退出码 0 = 全过；1 = 有失败
 ```
 
