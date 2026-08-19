@@ -1,27 +1,27 @@
 ---
 name: hermes-dsh-fusion
-description: DSH 融合执行——**任何涉及 DSH 的任务**（跑长任务/批量/调研 DSH 插件与生态/推荐/分析/评估）默认走桥驱动；收到任务先按「默认用 DSH」判据决策，命中自干判据才自己干。触发词：DSH、插件推荐、生态调研。
-whenToUse: 默认全部场景考虑 DSH 引擎参与——工程执行/创作推敲/协作起草/渠道辅助/调研分析/插件评估推荐；**用户点名 DSH 或任务涉及 DSH 相关话题时必用**
-version: 0.3.1
+description: DSH 执行驱动——2026-08-19 解耦后 Hermes 与 DSH 独立运行，Hermes 承担项目工作（飞书/cron/记忆/桌面）；需要 DSH 引擎执行（长任务/批量/调研/分析/评估）时**显式调用**桥（scripts/dsh_bridge.py），不再默认走桥。触发词：DSH、插件推荐、生态调研。
+whenToUse: 用户点名 DSH 或明确需要 DSH 引擎执行时；Hermes 自干判据不满足的长任务/批量/调研分析。**不再默认**——解耦前默认策略已停用（2026-08-19 用户拍板「先拆开，Hermes 先顶着项目工作需求」）。
+version: 1.0.0
 author: Hermes Agent
 license: MIT
 metadata:
   hermes:
-    tags: [DSH, DeepSeek-Harness, 融合, 执行引擎, 批量任务, 调研]
+    tags: [DSH, DeepSeek-Harness, 执行引擎, 批量任务, 调研]
     related_skills: [hermes-workspace-conventions]
 ---
 
-# Hermes × DSH 无感融合
+# Hermes × DSH 执行驱动（2026-08-19 解耦版）
 
-**原则：不是"外包"，是一个增强的 Hermes。** 用户在 Hermes 里说话，Hermes 判断怎么干——适合 DSH 执行形态的活自动落到 DSH（其会话 cwd 长在 Hermes 项目目录，规范/知识/资产天然同源），思考链路回流 Hermes 对话流，用户在对话里看到完整推理过程，无从感知也不需感知"这是 DSH 干的"。
+**原则：两侧独立运行。** Hermes 承担项目工作（飞书/cron/记忆/桌面）；DSH 独立运行（web 8080，技能库为实体副本）。需要 DSH 引擎执行时**显式调用**，不再默认走桥。桥（scripts/dsh_bridge.py）保留为显式调用通道，非自动策略。
 
-**默认策略：默认用 DSH，失败自动降级。** 收到任务先默认考虑 DSH 引擎参与（全部场景开放，没有禁区）。**降级护栏**：桥不可用/首次调用报错 → 自动降级 Hermes 本机执行，不阻塞用户，并在回复里说明一句（不夸大、不掩饰）。用户不需要点名"用 DSH"——默认就在用。
+**触发方式**：用户点名「用 DSH」/「推给 DSH」/「DSH 出方案」，或任务满足走桥判据（长任务/批量/结果大/需留痕）且明确决定用 DSH 执行时。
 
 ## When to Use
 
-- **默认：全部场景开放。** 收到任务默认考虑 DSH 引擎参与——工程执行（长任务/批量/文件/分析/脚本）+ 创作推敲（剧本/歌词/分镜，DSH 读知识库+项目文档参与） + 协作起草（回复/文档，DSH 起草或审读）+ 渠道辅助（简报生成/记忆整理，DSH 产出 Hermes 落库）
-- 用户点名「用 DSH」
-- 唯一保留：渠道工具的**最终执行**（飞书发送、cron 调度、Hindsight 写入、MCP 配置）由 Hermes 完成——DSH 没有这些渠道工具；但能力输出（起草/分析/审读/生成）可以来自 DSH
+- 用户点名「用 DSH」（保留）
+- 显式决定用 DSH 执行的长任务/批量/调研/分析（判据见下）
+- **不再默认**：收到任务不再自动考虑 DSH 引擎参与；Hermes 自干为主（渠道工具最终执行、cron 调度、记忆写入本就归 Hermes）
 
 ## cwd 定位（同源锚的正确用法）
 
@@ -265,5 +265,31 @@ registry 文件：`.hermes/dsh-registry.json`（`list` 可查投递/复用统计
 3. **超时**：BRIDGE_RESULT 返回 `status: timeout`，活跃线程保留，同 cwd 续投可续；超长任务给足 --timeout
 4. **DSH web 重启**（8080 进程没跑）→ 桥退出码非 0，Hermes 降级本机执行；会话存磁盘可 resume
 5. **轨迹里 assistant/chunk 是 token 级流**：桥用 assistant/message（完整消息），不要逐 chunk 展示
-6. **Windows 路径**：cwd 用 `C:\...` 格式（桥接受），DSH 内工具用 pwsh（PowerShell 语法）
-7. **别续"上次超时未收尾"的旧线程**：可能再次等待——换线时用 --new
+7. **Windows 路径**:cwd 用 `C:\...` 格式(桥接受),DSH 内工具用 pwsh(PowerShell 语法)
+8. **别续「上次超时未收尾」的旧线程**:可能再次等待——换线时用 --new
+9. **inline 任务文本会被 bash 改写**(2026-08-19 实测两次,两次不同失败模式):
+   - **A. 命令替换**:任务文本里出现反引号 / `$()` / `{}`/JSON 段,bash 把它当命令执行,stderr `xxx: command not found`,桥 5 分钟到点返回 timeout 124。**标志**:bridge 日志没记录 prompt 成功 / DSH 收到的是字面 `--task-file` 这种"参数名当任务"。
+   - **B. 凭空虚构参数**:CLI 不存在 `--task-file` 这种参数——`run --help` 只支持位置参数 `<cwd> <task>` + `--route/--label/--new/--timeout/--ttl`。任何"为了绕开 shell 转义"加的自定义 flag,都会被 bash 当成任务文本传给桥。
+   - **唯一稳的姿势**:**任务文本写到文件 + 用 Python 脚本调 `run_task()`**。不要相信任何"smart quoting" / `--task-file` / `eval $()`。Python `urllib` 把字符串变成 JSON payload 发给 `/api/session.prompt`,完全绕开 shell:
+     ```python
+     # scripts/_dispatch.py
+     import sys
+     sys.path.insert(0, r"C:/Users/HMSJ/Documents/Hermes/scripts")
+     import dsh_bridge as br
+     task = open(r"C:/Users/HMSJ/AppData/Local/Temp/dsh_task.md", encoding="utf-8").read()
+     print(br.run_task(cwd=r"C:/.../cwd", task=task, route="...", force_new=True, timeout_s=480))
+     ```
+   - 跑这种脚本用 `terminal(background=True, notify_on_complete=True)`——桥可能阻塞 5+ 分钟,前景 terminal 会在 300s 截断。
+   - **诊断口诀**:bridge `timeout` + stderr 是 shell 报错 = 任务没投出去,DSH 那边可能正"自己找事做";`timeout` + stderr 干净 = DSH 真在跑,只是慢。
+
+10. **超时 ≠ 没在干,更不等于任务丢了**(2026-08-19 二次踩坑)。`status: timeout` 只代表"桥轮询超 deadline";DSH 会话本身可能还在磁盘活跃(注册表 active 字段=True)、可能根本没收到任务、可能在跑大活。**`status: timeout` 永远要读 `session.jsonl.zstd` 才能定因**:
+    - 路径:`~/.dsh/sessions/<projectKey-escaped>/<sessionId>/session.jsonl.zstd`(.zstd 用 `zstandard` Python 库解压;系统无 zstd CLI)
+    - 看 `type=user/message` 的 seq 是否包含你的任务文本——包含 = 任务已投,DSH 在干,bridge 只是等了不到 turn/end;不包含 = 任务根本没进会话
+    - 看 `type=assistant/message` 的 reasoning 第一句——DSH 是不是在自言自语"我没收到任务/我在探测环境"。这种就是任务丢失,要 `--new` 重投
+    - **决策树**:
+      - 任务文本进了 + DSH 在干真活 → 同 cwd 同 route 续投(不加 `--new`),告诉 DSH「继续」
+      - 任务文本没进 + 活跃会话空转 → **`force_new=True` 开干净新线**,别续旧(它已经被污染)
+      - 任务文本进了 + DSH 卡死/无 tool 活动 5 分钟+ → `kill` 旧会话(`process kill` 或 close 后 force_new),别续
+    - 这一切**不是用户问起才做**——`timeout` 一回,自动跑这套诊断脚本(`scripts/diag_bridge_timeout.py` 见参考)。
+
+11. **不要预支"DSH 在干"的声明**。bridge 返回 sessionId 不代表 DSH 开始读源码——它要先走 create→permissions→inbox→title→context 初始化(可能 5-15 秒),看到首个 `tool/call` 事件才算真开干。对话流里说"DSH 收到任务书、桥在跑"是 OK;说"DSH 在改 service.py"是预支——用户当场就会抓(2026-08-19 用户原话「我看到这个 msg,思考 5 秒,想到点:DSH 没在干,刚刚才派给它」)。纪律:**桥 timeout/创建中** 阶段只说「派发已发出」;**首个 tool/call 出现后** 才说「DSH 开始改 X」。
