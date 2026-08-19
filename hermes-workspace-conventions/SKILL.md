@@ -308,6 +308,26 @@ Memory 处于系统提示「背景知识」层，agent 任务中注意力在 ski
 
 SOUL.md = agent 核心人格，只写「我是谁、怎么做事」。禁止写操作规则。禁止 agent 主动修改，仅用户可改。
 
+### git 历史不一定完整，commit message 列了文件 ≠ 文件真在 git（2026-08-19 实测）
+
+恢复历史产物时（DSH 融合审查报告、某次重构的产物），**不要只信 commit message**——`git log --all --diff-filter=A --pretty="%h %s" -- <path>` 必须能命中文件。实测案例：commit message 写「分析/: DSH 融合审查报告 + 方案会话完整记录 + scripts工具分析（DSH 实测产出）」，但 `git log` 只命中 1 份（逻辑定稿.md）；另外 3 份当时根本没进 git（用户直接操作文件系统）。
+
+**恢复顺序**：
+
+1. 先 `git log -- <file>` 确认文件是否真在 git
+2. 不在 → **不要从 git 历史捞，去 Obsidian Vault 找**——Vault 是双层记忆架构里的归档层（用户原话「重要的东西 Obsidian 都要留底」），按 `Hermes运维/`、`分析/` 等目录定位
+3. 找到了 → 复制回工作区并 commit（这一步是真的补回 git）
+4. **Obsidian 没有** → 才是真的丢，承认丢失而不是伪造
+
+**git vs Obsidian 分工**（本机铁律，不要漂移）：
+- **git = 工作区自身的版本历史 + 代码资产**（可以重建的代码/skill/script）
+- **Obsidian = 跨工作区的事实归档 + 引用证据 + 笔记**（不可重建的会议纪要、对话录音、Obsidian 图谱、跨工作区参考资料）
+- skill 文件 = 双侧共享，DSH 侧是 robocopy 实体副本；两侧都要维护或单源 → 镜像
+- 记忆档案（MEMORY/USER/画像）= Obsidian 唯一源（git 不会进）
+- 飞书评论会话 = Obsidian 唯一源（git 不会进）
+
+反向同样适用：纯代码改动只该在 git（不要镜像到 Obsidian 当副本），纯笔记只该在 Obsidian（不要 commit 到 git 当源代码）。
+
 ### HERMES_HOME ≠ ~/.hermes/
 
 Windows 上真实 HERMES_HOME 在 `C:/Users/<user>/AppData/Local/hermes/`，不是 `~/.hermes/`。编辑前先 `hermes config path` 确认。
@@ -486,6 +506,10 @@ cd <主仓库> && git worktree remove /tmp/skills-push
 ```
 
 **根因防范**：仓库内 .git 目录不要复制——clone 只做一次，后续 clone 到新位置或用 worktree。skill-publish 流程必须指向唯一正本路径。
+
+### `hermes cron update` 不存在（用 `edit --add-skill`）
+
+任务挂载/卸载 skill 走 `hermes cron edit <job_id> --add-skill <名称>` / `--remove-skill <名称>` / `--clear-skills`，**不是** `hermes cron update`（报错 `invalid choice: 'update'`）。`edit --skill <名称>` 是替换整套；`--add-skill` 才是追加单个。批量挂同一 skill 给多个 cron 时，`for jid in ...; do hermes cron edit "$jid" --add-skill X; done` 比 `update` 假设靠谱。
 
 ### 批量未归档清理策略（方案 C，2026-08-17 实测）
 

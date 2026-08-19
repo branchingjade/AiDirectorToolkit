@@ -84,6 +84,34 @@ timeout 400 node --import tsx/esm apps/cli/src/bin.ts --profile headless "任务
 - `references/web-api-protocol.md` — /api 网关完整协议（信封/方法表/信任围栏/轨迹事件/坑清单/最小示例）
 - `references/session-log-extraction.md` — headless 会话 zstd jsonl 提取与导出方法
 
-## 下一步（未完成）
+## 融合层（2026-08-17 已完成）
 
-融合层最小版：共享工作区（AGENTS.md + 挂知识库 skill）+ orchestrator skill + WebSocket 轨迹回流 + 验收归档 → 一单真实任务全链路验证（派活 → 上下文注入 → DSH 干活 → 轨迹回流 Hermes 对话 → 产出落项目目录 → Hermes 验收提交）。
+融合层最小版已交付（commit e387c1f + e63346f + 5d8885c），全链路实测通过。实现详情见 `hermes-dsh-fusion` skill（用户创建，含桥代码/任务模板/验收流程/路由规则/NEED_INPUT 回路/cwd 定位/判据）。本 skill 保留架构决策与协议事实。
+
+### 已落地的关键技术件
+
+| 件 | 说明 |
+|---|---|
+| **桥** `scripts/dsh_bridge.py` | 封装 /api（session.create/prompt/history）+ 会话路由 registry + 轨迹格式化 + NEED_INPUT 中途反馈 + seq 轮询（区分新旧回合） |
+| **会话路由** | 同 cwd+同 topic+30min 内复用；topic 完全相同或两边都为空才复用（单边空新开）；`--new` 强制新开；`--route` 任务线 ID（DSH 审查建议，已落地） |
+| **NEED_INPUT 回路** | DSH 缺料输出【NEED_INPUT】→ 桥检测（排除否定语境）→ Hermes 补料 → 同 topic 续投（增量注入） |
+| **seq 轮询修复** | 复用会话时按事件 seq 只认本轮 turn/end（P1#5 落地，修复旧 turn/end 误判完成） |
+| **cwd 定位** | 按任务类型指向具体目录（创作活→Vault 项目目录、脚本活→工作区、子项目→Projects/xxx），不是固定工作区根 |
+| **workspace.create** | DSH /api 有 workspace.create（实测可用），可为 Hermes 目录建工作区（但 session.attach 404，已有会话不自动归入） |
+| **DSH 审查闭环** | 3 次审查（融合设计/反向桥/边界裁定）→ P0 全修 + 精确判据（走桥/自干/兜底）落地进 skill |
+| **cron 覆盖** | 5 个分析类 cron 挂 hermes-dsh-fusion skill（GitHub 三报/飞书摘要/版本简报）；9 个运维/判断型不挂 |
+| **逻辑定稿存档** | `分析/DSH融合层逻辑定稿.md`（全链路 7 环 + 判据 + 覆盖范围 + 兜底 + 四闭环） |
+
+### DSH 审查产出的精确判据
+
+**走桥**（满足任意一条）：步骤≥2 有依赖/有歧义/单步≥5s 或总≥30s/结果>10KB/需重试验收/fan-out/需留痕。**自干**（全满足）：单步+确定性+可逆+小结果+<5s+简单上报。**兜底**：拿不准→走桥（默认方向）。判据单位=任务/目标（不是单个工具调用）。DSH 审查关键洞见：改 skill 是自指修改+高 blast radius，不归轻操作。
+
+### DSH 源码确认的机制（修正审查报告旧结论）
+
+- **自动压缩确认存在**（`packages/compaction/compaction-basic`）：默认开启，阈值 80% contextWindow，回合边界触发，产出 compaction/summary checkpoint（含决策/理由/约束/待办）。桥已加 compacted 字段标注。
+- **llm-fallback 确认可用**：opencode-go 401 → 自动切 deepseek-official，实测通过。
+- **web /api 网关协议稳定**：session.create/prompt（queue=投递即返回）/history/events.mux，loopback 免鉴权，schema 已实测锁定。
+
+### 上游待固化契约（6 项）
+
+事件 schema 稳定文档、prompt mode 枚举、sessionId 命名规则、session close/delete API、history 滑窗行为、中断可续性。DSH 评估：上游固化比 Hermes 改桥更治本。

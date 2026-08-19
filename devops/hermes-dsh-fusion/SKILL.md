@@ -1,21 +1,23 @@
 ---
 name: hermes-dsh-fusion
-description: DSH 执行驱动——2026-08-19 解耦后 Hermes 与 DSH 独立运行，Hermes 承担项目工作（飞书/cron/记忆/桌面）；需要 DSH 引擎执行（长任务/批量/调研/分析/评估）时**显式调用**桥（scripts/dsh_bridge.py），不再默认走桥。触发词：DSH、插件推荐、生态调研。
-whenToUse: 用户点名 DSH 或明确需要 DSH 引擎执行时；Hermes 自干判据不满足的长任务/批量/调研分析。**不再默认**——解耦前默认策略已停用（2026-08-19 用户拍板「先拆开，Hermes 先顶着项目工作需求」）。
-version: 1.0.0
+description: DSH×Hermes 无缝融合——DSH 是 Hermes 默认执行引擎（本机 127.0.0.1:8080）。全部场景默认走 DSH：工程执行/创作推敲/协作起草/渠道辅助/调研分析/插件评估，Hermes 管渠道工具最终执行。触发：DSH、bridge、融合、降级、轨迹回流。
+whenToUse: 默认加载——收到任务先考虑是否走 DSH 引擎（除渠道工具最终执行/简单问答外）；用户未指定即按默认走 DSH。决策由 Hermes（agent）判断，桥（代码）执行。
+version: 2.2.0
 author: Hermes Agent
 license: MIT
 metadata:
   hermes:
-    tags: [DSH, DeepSeek-Harness, 执行引擎, 批量任务, 调研]
-    related_skills: [hermes-workspace-conventions]
+    tags: [DSH, DeepSeek-Harness, 执行引擎, 融合, 默认]
+    related_skills: [hermes-workspace-conventions, hermes-dsh-skill-sync]
 ---
 
-# Hermes × DSH 执行驱动（2026-08-19 解耦版）
+# Hermes × DSH 无感融合（DSH 默认引擎版）
 
-**原则：两侧独立运行。** Hermes 承担项目工作（飞书/cron/记忆/桌面）；DSH 独立运行（web 8080，技能库为实体副本）。需要 DSH 引擎执行时**显式调用**，不再默认走桥。桥（scripts/dsh_bridge.py）保留为显式调用通道，非自动策略。
+**原则：DSH 是默认执行引擎。** 用户面对一个更强的 agent——背后是 DSH 跑任务、Hermes 管渠道工具最终执行。任务分类边界：
 
-**触发方式**：用户点名「用 DSH」/「推给 DSH」/「DSH 出方案」，或任务满足走桥判据（长任务/批量/结果大/需留痕）且明确决定用 DSH 执行时。
+- **DSH 直连读类**（Hindsight recall/统计、cron 查看、Obsidian·skill 文件）——桥 `util` 命令
+- **DSH 执行类**（工程长任务/批量/调研分析/创作推敲/协作起草/插件评估/技能库维护）——桥 `run` 命令
+- **Hermes 单出口**（飞书发送/cron 增改/Hindsight 写入/Obsidian 写入/git 提交）——单出口审计纪律
 
 ## When to Use
 
@@ -293,3 +295,75 @@ registry 文件：`.hermes/dsh-registry.json`（`list` 可查投递/复用统计
     - 这一切**不是用户问起才做**——`timeout` 一回,自动跑这套诊断脚本(`scripts/diag_bridge_timeout.py` 见参考)。
 
 11. **不要预支"DSH 在干"的声明**。bridge 返回 sessionId 不代表 DSH 开始读源码——它要先走 create→permissions→inbox→title→context 初始化(可能 5-15 秒),看到首个 `tool/call` 事件才算真开干。对话流里说"DSH 收到任务书、桥在跑"是 OK;说"DSH 在改 service.py"是预支——用户当场就会抓(2026-08-19 用户原话「我看到这个 msg,思考 5 秒,想到点:DSH 没在干,刚刚才派给它」)。纪律:**桥 timeout/创建中** 阶段只说「派发已发出」;**首个 tool/call 出现后** 才说「DSH 开始改 X」。
+
+12. **Cordis Service 双重注册阻断 session.create（2026-08-19 实测，两种独立根因）**。session.create 返回 `agent-preset-invalid`、错误码带 `Service already registered`——两种独立路径都会触发，**必须分别修复**：
+
+   **根因 A：skill-filesystem 23 个分类目录双重注册**。DSH 的 `creator` preset 在 `~/.dsh/.agent-presets/creator/agent.cordis.yml` 里有 skill-filesystem 块列出 23 个分类子目录（`devops/`、`scriptwriting/`、`妖玉影视/` 等）；**机器级 patch** `~/.dsh/cordis.patch.yml` 也列同样 23 个目录。DSH 启动时两层都执行 → 每个 skill 的 cordis Service provider key 报 `already registered` → preset 加载失败。
+
+   **根因 B：`tool-cordis` 与 `WorkspaceRegistry` 争 cordis `Service` key**。`packages/workspace/workspace/src/index.ts` 里 `WorkspaceRegistry extends Service`——DSH 启动时它先占用 cordis 内置 inspection provider key `Service`。preset `creator` / `hermes-cordis` 里也声明 `tool-cordis` 插件（`@deepseek-ai/dsh-tool-cordis`）——它也要注册同 key `Service` → `already registered`。**重启后才会出现**（首次启动 WorkspaceRegistry 可能没初始化占位）。
+
+   **修复**：
+   - 根因 A：删 preset 层 23 个分类目录块，只留 `process.getBuiltinModule('node:url').fileURLToPath(new URL('skills/', baseUrl))`（preset 自带目录 cordis-plugin-development + editing-cordis-compositions）；分类目录由 cordis.patch.yml 机器级统一负责。两份要立即同步。
+   - 根因 B：**注释掉 preset 里的 tool-cordis**（让 `creator` / `hermes-cordis` 两份 agent.cordis.yml 都把 `- id: tool-cordis` 注释掉）。副作用：DSH agent 失去 self-modification runtime 能力——本机生产用 OK，自我修改走 Obsidian + git 路径。
+   - **DSH 升级可能复发这两根因**——升级后跑一次 session.create 验证，复发就重新执行两条修复。
+
+   **诊断口诀**：`session-not-found` + 8080 监听正常 + DSH 启动无明显报错 = 八成 cordis 双重注册。`netstat -ano | grep :8080 | grep LISTENING` 先确认 DSH 在跑（避免误判为桥问题），再 `curl -X POST .../api/session.create` 看响应里有没有 `agent-preset-invalid`；错误详情里 `Service already registered` 出现几次 / 引用哪个文件路径区分根因 A 或 B。
+
+13. **cwd 必须是 Windows 原生路径，桥要规范化（2026-08-19 实测）**。从 bash 拿到的 cwd 形如 `/c/Users/HMSJ/Documents/Hermes`（MSYS 缩写）；DSH 把它当字面值存进数据库 = `C:\c\Users\HMSJ\Documents\Hermes`，创建伪工作区、session 错位、后续 prompt 全 `session-not-found`。**桥必须在 `_ensure_workspace()` 内部把 `/[a-z]/...` 改成 `[A-Z]:\...`**（参见 `references/DSH-bridge-cwd-normalization.md` 完整诊断）。session.create **永远优先传 workspaceId**（桥 v2.1 已是这个设计），让 DSH 按 workspace 的 path 字段而非请求 cwd 决定归属，规避路径规范化歧义。**任何 cron prompt / 任务书 / shell 脚本传 cwd 给桥时都得走 `_normalize_cwd()`**——直接传 POSIX 路径等于把坑挪到调用方。
+
+14. **DSH 没有真"挂起提问"协议，靠启发式检测（2026-08-19 实测）**。DSH web UI 显示"提问·等待回答"+ 候选弹弹——**这是 DSH web 客户端的渲染效果，不是 server-side 协议**。实测证据：`session.history` 最新事件是 `turn/end`（已完成），没有 `ask/pending/need_user` 类型事件；`ask_user_question` 工具虽在 DSH 工具清单里（toolList），但**调用它不产生外部可监听事件**——桥/Hermes/飞书渠道收不到通知。
+   - DSH web UI 检测到 assistant 文本里有结构化候选（数字列表 + 触发词），把它显示成弹窗让你手动点选。
+   - **反向通道实现（scripts/dsh_inbox_watcher.py）**：扫描所有最近更新的 session → 拉 `maxMessages:30` 的 history → 检测 assistant 文本里有数字/字母/圆圈编号开头的列表 + 触发词（「请选择/确认/推荐/建议/首选/选哪个/哪个好」等14个）→ agent 仲裁（技术性确认→代答；其他→推用户）→ 双渠道推送。
+   - **DSH 升级可能改 ask 触发事件 schema**——升级后跑一次 watcher 端到端验证：喂 DSH 一个"按格式给出三个候选"的 prompt，看 watcher 检测 + 推送是否正常。
+   - **桥脚本调用 lark-cli 不要走 wrapper**：`lark-cli` 在 Windows 是 shell wrapper（`/c/Users/HMSJ/AppData/Local/hermes/node/lark-cli`），subprocess 直接调它报 `WinError 193 %1 不是有效的 Win32 应用程序`。**直连 node + run.js**：
+     ```python
+     cmd = ["node", LARK_CLI_RUNJS, "im", "+messages-send",
+            "--as", "bot", "--chat-id", CHAT_ID, "--text", msg]
+     ```
+     `LARK_CLI_RUNJS = C:/Users/HMSJ/AppData/Local/hermes/node/node_modules/@larksuite/cli/scripts/run.js`。**私聊频道 ID 是 `oc_xxx`（chat-id），不是 `ou_xxx`（user-id）**——直接传 `oc_f7b91a...` 当 user-id 会报 `invalid user ID format`。
+
+15. **双向同步 DSH 侧修改 + 桥 cwd 修复要同步进 Obsidian 知识库（2026-08-19 实测）**。今天修了 `~/.dsh/.agent-presets/{creator,hermes-cordis}/agent.cordis.yml`（注释 tool-cordis）。**DSH 升级会覆盖这两个文件**（preset 是官方组件，升级会重建）。坑 12 修复注释必须留在**两处**：
+    - preset 文件内（注释 + 注释说明，作为 in-file 提醒）
+    - skill 坑 12 的修复段落（升级后执行依据）
+    两个地方不重复写——同段说明两处各贴一份。**升级 DSH 后第一时间**：跑一次 `session.create` → 复发就重新打注释；不复发说明 DSH 已修。
+
+16. **workspace.json 坏工作区清理要全栈更新（2026-08-19 实测）**。修复 cwd 规范化后，磁盘上可能残留坏工作区（path=`C:\c\...` 这种）。**只删 `tables.workspaces[id]` 不够**——还要删 `global.workspaceIds` 数组里的 ID。DSH boot 校验严格：`WorkspaceRegistry.validateStoredState` 报 `registry order references missing workspace '<id>'` 直接拒绝启动。完整清理路径：
+   1. 停 DSH web（kill node 进程）
+   2. 备份 `~/.dsh/storages/workspace.json`
+   3. 删 `tables.workspaces[bad_id]`
+   4. 删 `global.workspaceIds` 数组里的 `bad_id`
+   5. 写回 + 重启 DSH 验证
+   6. **桥端到端跑一次**（`scripts/dsh_bridge.py run`）→ 新会话应归入正确工作区而非新建伪工作区
+   `session_projcache.json`（199KB）也清——它可能藏着"已注册 Service"等过期缓存（虽然不是根因，但删了不亏）。
+
+## 反向通道（DSH → Hermes 推送用户回答）
+
+`scripts/dsh_inbox_watcher.py`（v1.0，2026-08-19）+ 计划任务 `Hermes_DSH_Inbox_Watcher`（每 1 分钟，Windows 最低粒度）：
+
+- **触发**：DSH 跑任务时输出结构化提问（数字/字母/圆圈编号候选列表 + 触发词）
+- **检测启发式**：`session.list` → 拉最近 30 分钟更新的会话 → `session.history maxMessages=30` → 正则 `(?:\d+[\.、]|[①-⑩]|[A-Z][\.、\)])\s*([^\n]{2,80})` 匹配 ≥2 个候选 + 触发词检测
+- **agent 仲裁（保守安全策略）**：
+  - 技术性确认（触发词含「确认/hello/测试/验证/系统/连通」） → agent 自动选 + 回投 `session.prompt`
+  - 其他（推荐型/选择型/不确定） → 推用户（双渠道：桌面占位 + 飞书 bot 私聊）
+- **推送通道**：
+  - **桌面**：v1.0 占位（`route_to_desktop` 仅记日志）；未来扩展接 Hermes Electron Notification
+  - **飞书**：lark-cli 直连 node 调 run.js（`+messages-send --as bot --chat-id <oc_xxx> --text "<msg>"`）—— `oc_xxx` 是私聊频道 ID 而非 user-id
+- **状态文件**：`~/.hermes/dsh-inbox-state.json`（按 sessionId 记录 `last_seq` 防重复提醒、`last_notified_at` 冷却 60s）
+- **回流通路（v1.0 缺失，待补）**：你在飞书回复后，watcher 检测新 user message 注入对应 DSH session——目前未实现
+
+## 完整修复路线（DSH 融合解耦后重新接入的 8 步）
+
+> 2026-08-19 实测路线。DSH 解耦后（commit 238d139）如果需要恢复默认引擎铁律，
+> 完整 8 步（每步都可能独立失败，按顺序排查）：
+
+1. **恢复桥 + 看门狗**：`git show 238d139^:scripts/dsh_bridge.py` + `:scripts/dsh_watchdog.py` 反向捞回
+2. **恢复 .hermes.md DSH 铁律 + 收尾六面**（DSH 会话 close 挪回 skill）
+3. **修 cordis 双重注册根因 A**（skill-filesystem 23 行）—— 不修 session.create 直接报 agent-preset-invalid
+4. **修 cordis 双重注册根因 B**（tool-cordis 注释）—— 重启后才会触发
+5. **修桥 cwd 规范化**（见 pitfall 13）—— 不修 session 落伪工作区
+6. **重建 DSH_Watchdog 计划任务**为每5分钟（解耦期可能被改 One Time Only + Disabled）
+7. **挂 hermes-dsh-fusion skill 到分析类 cron**（hermes cron edit `<job_id>` --add-skill hermes-dsh-fusion，不是 update——update 不存在）
+8. **从 Obsidian 还原分析/ 目录 + 建 Hermes_DSH_Inbox_Watcher 计划任务**（git 历史不一定全；commit message 列了 3 份但实际只 1 份进 git——git 历史是工作产物的辅助，Obsidian 才是）
+   额外：建 `Hermes_DSH_Inbox_Watcher` 计划任务（每分钟跑 `scripts/dsh_inbox_watcher.py`）——反向通道监听器
+
+**端到端验证**：`scripts/dsh_bridge.py run "<cwd>" "hi" --route verify-fusion` → DSH 回 "hi" + BRIDGE_RESULT status=done + 复用同 sessionId（reused:true）。
