@@ -94,7 +94,7 @@ Obsidian 剧本库（权威副本，已修复）
    ↓ 复制
 film-suite-research/华语剧本+海外剧本（本地源）
    ↓ 复制
-skill references/大师技法卡片（正本 GitHub）
+妖玉影视/_知识库/references/大师技法卡片（skill 正本，GitHub AiDirectorToolkit 同步）
 ```
 
 ### 7. 更新 MOC + 质检
