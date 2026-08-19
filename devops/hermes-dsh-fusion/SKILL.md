@@ -410,41 +410,44 @@ registry 文件：`.hermes/dsh-registry.json`（`list` 可查投递/复用统计
 
     **验收标准**：测试套件必须 7/7 全过 + 把代码回退到修复前测试必须红（S7 反证）。跑法：`python scripts/test_dsh_bridge_p0_e2e.py`（退出码 0 = 全过）。详细实现见 `references/turn-end-reason-and-stdout-truncation.md` "端到端测试的关键技巧" 节。
 
-## 反向通道（DSH → Hermes 推送用户回答）
+## 反向通道（DSH 提问 → 回到发起人所在渠道，「哪来的会哪去」）
 
-**v1.2（2026-08-19 18:55 终态）：DSH mux-token 机制 + Hermes 桌面插件 `dsh-inbox/plugin.js`**
+**v3（2026-08-20 终态）：事件驱动 + 来源路由 + 原生回答通道**
 
-**端到端 push 通道**（**和 Hermes 原生通知100% 一致**）：
-- DSH 服务端（trust.ts 改）**支持 mux-token**——`ws://...:8080/api/events.mux?token=<xxx>` 带正确 token 放行任意 Origin（包括 `Origin: null` / file://）
-- DSH 启动时**自动生成 token**写到 `~/.dsh/.mux-token`（44 字符 base64）
-- Hermes 桌面插件 `register()` 时调用 `loadMuxToken(ctx)`：优先 ctx.storage，否则读 `~/.dsh/.mux-token`，并持久化到 ctx.storage
-- `connect()` 时构造 `?token=${encodeURIComponent(token)}` 拼到 ws URL
-- 监听 `question/requested` 帧 → 调 `host.notify({ kind: 'warning' })` + `ctx.os.notify(...)` 双通道通知 → 弹 toast + 系统通知 + 右上角图标徽标
-- 用户在 DSH web 回答后 → DSH 推 `question/resolved` 帧 → 插件自动移除 pending 条目
+**设计原则（用户拍板）**：DSH 会话有来源，提问就该回到来源去——谁发起的会话，DSH 缺料时问谁，不统一推到某个固定地方。原会话出，原会话进。
 
-**插件端 token 加载——必须走后端不能 `require('fs')`**：Electron 渲染进程默认 sandbox=true + nodeIntegration=false，**`require('fs')` 在前端插件里抛错**。插件调 `ctx.rest('/token')` 走本插件后端（`dashboard/plugin_api.py` 的 FastAPI 路由），后端在 Hermes 主进程有 fs 权限，读 `~/.dsh/.mux-token` 返回 token。插件持久化到 `ctx.storage` 避免反复 fetch。
+**架构（三件套）**：
+1. **桥带来源元数据**：`dsh_bridge.py run --source desktop|feishu|cron --owner <open_id>` 写入 registry（`source` + `owner` 字段）。Hermes 在飞书会话派活时传 `--source feishu --owner <发起人 open_id>`；桌面派活传 `--source desktop`；cron 传 `--source cron`（cron 不涉及提问，路由表无此分支）。
+2. **事件驱动监听器 `scripts/dsh_mux_listener.py`**（常驻，计划任务 `Hermes_DSH_Inbox_Watcher` 每 N 分钟 `--once` 保活）：
+   - 连 `ws://127.0.0.1:8080/api/events.mux?token=<~/.dsh/.mux-token>`（mux-token 机制 8-19 打通）
+   - 实时收 `question/requested` 帧（DSH agent 调 ask_user_question 的原生推送，apiproxy 推 mux 队列——api-proxy.ts:1363）
+   - 查 registry 该 session 的 source/owner 路由：`feishu+owner → 飞书 DM 推给发起成员本人`（`--user-id ou_xxx`）；`feishu 无 owner → 妖玉 DM`；`desktop → 就地（web 弹窗已显示）仅留痕`；无 source → 按 cwd 回退
+   - 收 `question/resolved` → 清理 pending
+3. **原生回答通道**：成员回复 → `dsh_inbox_reply.py --sid <id> --pick N/--text` → **`POST /api/respond`**（ClientResponse 信封：`type='client-response'` + `rpcId` + `result.value{sessionId, answer.answers[{id, selected}]}`，api-proxy.ts:3633）→ DSH 继续。比 session.prompt 干净（rpcId 精确应答，answers 数必须等于 questions 数，selected 用选项 label）。
 
-**最小后端骨架**（`dashboard/manifest.json` + `dashboard/plugin_api.py`，注册到 `/api/plugins/dsh-inbox/<route>`）：
-- `GET /token` → `{token, port, wsUrl}`（直接读 `~/.dsh/.mux-token`）
-- `GET /health` → `{dsh_home, token_file_exists, dsh_listening_port}`（排错用）
-- `GET /probe` → 服务端视角 WS 握手测试（带 token / 不带 token 三种 Origin 场景）
+**respond 信封（实测锁定 2026-08-20）**：
+```json
+{"type": "client-response", "rpcId": "<echoed question rpcId>",
+ "result": {"ok": true, "value": {"sessionId": "<sid>",
+   "answer": {"answers": [{"id": "<question id>", "selected": ["<选项 label>"]}]}}}}
+```
+- HTTP body 就是 ClientResponse 本身（**不是**包在 payload 里；type 是 `client-response` 不是 `client-request`）
+- 答案数必须 = 问题数；id = 提问时声明的 question id；selected = 选项 **label**（单选一个）
+- 响应 `{"accepted": true}` = 成功；`not-pending` = 提问已过期；`bad-response` = 信封/schema 错
 
-**关键实现点**（DSH 自己设计的方案，2026-08-19 实测验证）：
-- 浏览器/桌面 webview 必然带 `Origin: null`/具体 Origin，DSH trust 拒 403
-- DSH 改 `packages/client/connection/src/api-request-trust.ts` + `api-request-trust.host.spec.ts`（测试）支持 token 旁路
-- Token 文件 600 权限（Windows 下等同只当前用户可读）
-- DSH 改动文件 7 个：trust.ts / index.ts (WS handler) / mux-token.ts / 3 测试文件 / package.json / tsconfig
-- DSH 修复进程可能跑很久（17+ 个 tool call，编辑核心信任逻辑）——耐心
+**事件驱动 vs 轮询/插件的取舍（用户拍板「哪来的会哪去」，2026-08-20）**：
+- v1 轮询 watcher（dsh_inbox_watcher.py，文本启发式检测）与 v2 桌面插件（dsh-inbox 统一推桌面 toast）**均留档**（`desktop-plugins-archive/dsh-inbox`、脚本保留）
+- 插件方案的根本错误：把「提问送到人面前」做成了「在桌面弹通知」——假设用户生活在桌面 app，而实际在 DSH web + 飞书；且单向无闭环（看到了还得回 web 答）
+- 轮询的根源问题：skill 坑 14「DSH 没有真挂起提问协议，靠启发式检测」——漏检/误检/有延迟
+- **事件驱动唯一正确**：原生帧即来即走；web GUI 会话天然不走 mux（前端 UI 就地弹窗，互不打扰）；cron 不提问无需处理
 
-**插件位置**：`C:\Users\HMSJ\AppData\Local\hermes\desktop-plugins\dsh-inbox\plugin.js`（约 19500 字节，纯前端 ESM）
+**验证（2026-08-20 实测全过）**：
+- 桥带 source/owner 投递 → registry 记录 ✓
+- DSH ask_user_question → events.mux 实时推 question/requested ✓
+- 监听器按 owner 路由 → 真实推送到杨璇飞书 DM（`--user-id ou_7c8f...`）✓
+- reply --pick → /api/respond → accepted:true → DSH 回复「已收到您的选择」→ turn/end completed ✓
 
-**启用方式**：Hermes 桌面 app 里 ⌘K → "Reload desktop plugins"（或等自动热加载）；titleBar 右上角出现 dsh-inbox 图标 + ⌘K "DSH Inbox" 调色板命令
-
-**⚠️ reload 不是可选项**：`controller.tsx` 启动时只调 `discoverBundledPlugins()`（扫 `src/plugins/` 内置插件），**`desktop-plugins/` 目录里的 runtime 插件需要 ⌘K → "Reload desktop plugins" 才会被 `discoverRuntimePlugins()` 扫到**。新插件写完到 desktop-plugins/ 后**没 reload 就不会出现**——日志里看不到任何 plugin 加载错误（因为根本没尝试加载），用户只会看到"插件不存在"的错觉。**症状识别**：desktop.log 里看到 dsh-inbox **零行日志** + reload 后立即有 log → 是这个原因。修复：⌘K → 搜 "Reload desktop plugins" → 回车。
-
-**v1.0 弃用**：`scripts/dsh_inbox_watcher.py` + `dsh_inbox_reply.py`（cron 轮询 + 飞书推送）—— 保留作为**兜底**（Hermes 桌面未运行 / 插件故障时）。
-
-## 16. DSH 跑长任务时不要凭工程量大小 abort（2026-08-19 实测教训）
+16. **DSH 跑长任务时不要凭工程量大小 abort（2026-08-19 实测教训）**
 
 **关键纪律**：DSH agent 在跑一个**改自己核心代码**的长任务时，**不要因为"工程量看起来太大"就 inject 停掉它**——它在改自己的核心模块（trust.ts、index.ts 等）跑 17+ 个 edit 是正常工作量。**用户视角**：DSH 改自己 = "它最了解怎么修自己"，让它跑完。
 
