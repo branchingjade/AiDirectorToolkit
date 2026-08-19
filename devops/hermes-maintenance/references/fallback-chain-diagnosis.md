@@ -40,7 +40,8 @@ grep -i "Retrying API call\|switching to fallback\|trying fallback" ~/AppData/Lo
 
 - **链条目缺 model 字段 = 静默失效**：`_iter_fallback_entries`（fallback_config.py:43）要求 provider 和 model 都非空，缺 model 的条目直接跳过。`- provider: deepseek` 没 model 就白配。
 - **同 provider 同模型条目被跳过**：`try_activate_fallback` 用 `agent.backend_identity.should_skip_candidate` 判重，与当前失败后端相同的条目跳过（防循环）——主模型是 deepseek-v4-flash 时，链里再写 deepseek/deepseek-v4-flash 等于不存在。
-- **真兜底 = 异 provider 条目**：链里 deepseek→deepseek 在 DeepSeek 整体宕机时同样失败，只有 xiaomi 等异 provider 条目才是真兜底。本机链：xiaomi/mimo-v2.5-pro → xiaomi/mimo-v2.5 → deepseek/deepseek-v4-flash（被跳过）→ deepseek/deepseek-v4-pro。
+- **真兜底 = 异 provider 条目**：链里 deepseek→deepseek 在 DeepSeek 整体宕机时同样失败，只有 xiaomi 等异 provider 条目才是真兜底。
+- **⚠️ 单一配置源原则下兜底链可以为空（2026-08-18 实况）**：用户拍板「所有模型配置和 `model.default` 保持一致」= `fallback_providers: []` 也算合规配置（兜底为空 = 和默认完全一致，无任何冗余/异 provider 配置）。**此情形下「兜底链空」不是配置漏配**，是用户明确接受「主模型挂了没有兜底」的语义。判断前先 `grep "fallback_providers"` 看当前值，别一上来按「应该有 4 个条目」诊断。旧默认是 `xiaomi/mimo-v2.5-pro → xiaomi/mimo-v2.5 → deepseek/deepseek-v4-flash → deepseek/deepseek-v4-pro`（已清空）。
 - **`resolve_entry_api_key` 返回 None 是正常的**：fallback 条目没配 `key_env`/`api_key` 时返回 None，让 `resolve_provider_client` 走 provider 标准凭据解析（XIAOMI_API_KEY / XIAOMI_BASE_URL 环境变量）。不要据此判「没配 key」。
 - **`resolve_provider_client` 返回 (client, final_model) 不是 (client, base_url)**：第二个返回值是模型名不是 URL，打印时别误读成 base_url 错误（实测踩过：把 final_model 当成 base_url 怀疑 xiaomi 路由坏了）。
 - **xiaomi 作为 LLM provider 走 generic API-key 分支**：`hermes_cli/providers.py:184` HermesOverlay(transport="openai_chat", base_url_env_var="XIAOMI_BASE_URL")。.env 中 XIAOMI_API_KEY + XIAOMI_BASE_URL 就位即可，实测 client 构建成功（https://api.xiaomimimo.com/v1/）。

@@ -27,5 +27,10 @@ zoom-out/
 # Hermes 运行时状态文件（不入库）
 .bundled_manifest
 .curator_state
+.curator_ledger.jsonl
 .usage.json
 .usage.json.lock
+
+# Python 缓存（不入库）
+__pycache__/
+*.pyc

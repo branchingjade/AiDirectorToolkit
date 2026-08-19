@@ -93,13 +93,34 @@ On Windows: `C:\Users\<user>\AppData\Local\hermes\state.db`（路径用正斜杠
 被问「网关正常吗」或排查服务存活时——**不要跑 `hermes gateway status/start`**（可能触发 update 恢复流程连带停 gateway，见 hermes-maintenance）。改用被动探测三件套：
 
 ```bash
-# 1. 端口监听（gateway 活着的最硬证据）
-netstat -ano | grep LISTENING | grep -E ":(8644|9119)"
-#    8644 = webhook 平台（gateway 进程内）  9119 = 远程 serve  9222 = CDP 浏览器  41595 = Eagle（无关）
+# 1. 端口监听（全部服务端口）
+netstat -ano | grep LISTENING | grep -E ":(8644|8642|9177|9119|8080)"
+#    8644 = gateway webhook 平台（gateway 进程内）
+#    8642 = API Server（OpenAI 兼容端点，gateway 进程内）
+#    9177 = Hindsight 记忆 daemon（独立进程，由 guard 计划任务 Hermes_Hindsight_Daemon 每5分钟保活）
+#    9119 = 远程 serve
+#    8080 = DSH web（完全独立于 Hermes，由 DSH_Watchdog 计划任务每分钟保活，需 DEEPSEEK_API_KEY）
 # 2. 日志新鲜度（logs/ 下 gateway.log mtime 在几分钟内 = 正在跑）
 ls -lt "$LOCALAPPDATA/hermes/logs/" | head
 # 3. 进程确认（大内存 python.exe = gateway 主进程）
 tasklist | grep -i python
+```
+
+**⚠️ 服务独立性（2026-08-17 实测确认）**：
+
+| 服务 | 跟随 Hermes 启动？ | 自己的保活机制 | 端口 |
+|------|-------------------|---------------|------|
+| gateway | 是（At logon 计划任务 Hermes_Gateway） | Hermes_Gateway_Watchdog 每5分钟 | 8644/8642 |
+| Hindsight daemon | 否（独立进程） | Hermes_Hindsight_Daemon 每5分钟 + watchdog 探针 | 9177 |
+| DSH web | 否（完全独立，重启 Hermes 不影响 DSH） | DSH_Watchdog 每1分钟 | 8080 |
+| HermesDashboard | 是（At logon 计划任务） | 无自愈（常驻） | 9120 |
+
+用户问「DSH 呢」/「Hindsight 呢」时——这些服务的死活与 gateway 无关，需单独查端口。
+
+**watchdog --status 快查**（覆盖 gateway + Hindsight daemon 两层）：
+```bash
+python3 'C:/Users/HMSJ/AppData/Local/hermes/scripts/gateway_watchdog.py' --status
+# alive=true, hindsight_daemon=ok → 两层都正常
 ```
 
 logs 里常见的「噪音」≠故障：

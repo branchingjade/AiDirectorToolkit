@@ -58,6 +58,13 @@ manifest.json 最小结构：`{"name": "<id>", "label": "...", "description": ".
 
 ## 前端组件 API（源码实测，bundled skill 文档没写全）
 
+- **⚠️ 必须用 ESM import 获取 React，不能用全局 `React`**（2026-08-17 实测 `ReferenceError: React is not defined`）。正确写法：
+  ```js
+  import { jsx, jsxs, Fragment } from 'react/jsx-runtime'
+  import { useState, useEffect, useCallback } from 'react'
+  import { Badge, Button, ... } from '@hermes/plugin-sdk'
+  ```
+  错误写法（会崩溃）：`const { useState } = React` 或直接用 `React.jsx(...)`。
 - 文件不能用 JSX 语法（不编译），全部 `jsx('div', {children})` / `jsxs`。
 - `SegmentedControl`：`options={[{id, label}]}` + `onChange`（**不是** items/onValueChange）。
 - `SearchField`：`containerClassName` 控制宽度（**没有** className/clearable prop）。

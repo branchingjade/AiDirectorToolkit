@@ -32,13 +32,17 @@ grep -n "AIAgent("  "$LOCALAPPDATA/hermes/hermes-agent"/plugins/platforms/feishu
 
 结论 = `agent.reasoning_effort`（无 per-model 覆盖、无平台级覆盖、无会话级覆盖时）。
 
-## 本机实况（2026-08-17 查证）
+## 本机实况（2026-08-18 查证，**单一配置源原则已生效**）
 
-- `agent.reasoning_effort: medium`（config.yaml:75）；无 `agent.reasoning_overrides`
-- `platforms.feishu.model: deepseek-v4-flash`（provider deepseek），平台段无 reasoning 键
+- `model.default: MiniMax-M3`（provider minimax）
+- `agent.reasoning_effort: medium`；无 `agent.reasoning_overrides`
+- **单一配置源实况（2026-08-18 改后）：**
+  - `platforms.feishu.model/provider` 已删 → 飞书消息端 = `MiniMax-M3`
+  - `delegation.model/provider` 已删 → 子代理 = `MiniMax-M3`
+  - `fallback_providers: []` → 兜底层空（用户明确接受「= 无兜底」语义，要的就是和默认完全一致）
 - `gateway_state.json` 无会话级 reasoning 覆盖
-- 飞书消息端 = deepseek-v4-flash / medium；评论 agent = deepseek-v4-flash（model.default 解析）/ medium（AIAgent 未传参回落全局）
-- `delegation.reasoning_effort: xhigh` → 飞书 channel_prompt 委托的子代理是 xhigh，比主会话高
+- 评论 agent = `MiniMax-M3`（`feishu_comment.py::_resolve_model_and_runtime` 只读 `model.default`） / `medium`（AIAgent 未传参回落全局）
+- `delegation.reasoning_effort: xhigh` → 飞书 channel_prompt 委托的子代理思考强度是 xhigh，**但模型本身已统一跟随默认**——xhigh 只是思考深度档，不是模型
 
 ## 工具坑（本次踩到，复用）
 

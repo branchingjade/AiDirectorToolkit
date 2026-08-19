@@ -1,7 +1,7 @@
 ---
 name: hermes-session-management
-description: "渠道会话的会话人/数据层/管理插件。触发词：会话人、渠道会话、会话管理、display_name、会话列表。"
-version: 1.0.0
+description: "渠道会话的会话人/数据层/管理插件。触发词：会话人、渠道会话、会话管理、display_name、会话列表、会话找不到、会话丢失。"
+version: 1.1.0
 ---
 
 # Hermes 渠道会话数据层与管理
@@ -126,6 +126,63 @@ Hermes 渠道会话（飞书/Telegram/群聊/DM/话题）的展示、数据存�
   - **类审计脚本 bug（实测）**：`scripts/audit_plugin_classes.py` 有 `Path(r"%LOCALAPPDATA%" % {"LOCALAPPDATA": ""})` 格式化占位 bug（ValueError: unsupported format character）且转义匹配易误报（CSS 选择器 `\.` 转义）。可靠替代：手工提取 JSX className + 提取 CSS 选择器集合（还原 `\[`/`\.`/`\:` 转义后比对）——见 references/comment-sessions-view.md 末尾的审计代码。
   - **列表 UI 偏好（2026-08-10 用户拍板，渠道+评论通用）**：排序下拉三档——时间↓（默认）/ 时间↑ / 消息数，localStorage 持久化（cs-dash-sort）；日期分组分隔符（sticky 吸顶条）——今天 / 昨天 / 前天 / 一周前(<7d) / 一月前(<30d) / 一年前(<365d) / 更早，每组显示「标签 (数量)」；边界规则 `Math.floor((now-ts)/DAY)`，`diffDays<1→今天`（含未来时区差）。
 - 插件开源发布全流程（审计维度/目录布局/CI/发布步骤/坑）：references/plugin-open-source-release.md
+
+## 渠道会话看不到/找不到的诊断铁律（2026-08-19 实测教训：**先实测再归因**）
+
+用户问「这个会话是谁的 / 为什么渠道会话管理找不到」时，**第一性原理 = 跑 SQL 实测对照真因，不要凭印象归因**。本节是 channel-sessions 插件列表行为的数据层基准——给用户/插件开发者一站式对照表，再据此推列表形态设计。
+
+**核心铁律**：诊断前先跑 SQL 看 `sessions` 表实际字段值（列名、过滤命中行数、父子关系），不要凭插件源码推论。本会话踩坑——我把真因错甩给 `source not in ("cli","tui","desktop")` 这条过滤，被用户当面纠正「睁眼说瞎话」。这条过滤在 `is_gateway` 字段计算时用，**跟"列表里看不到"无关**——真正命是 `WHERE parent_session_id IS NULL OR parent_session_id = ''`。
+
+**channel-sessions 插件三层过滤（按 SQL 顺序）**：
+
+| # | 过滤位置 | 过滤条件 | 影响什么 | 用户能否察觉 |
+|---|---|---|---|---|
+| 1 | `service.py:43` 顶层查询 | `parent_session_id IS NULL OR = ''` | **仅顶层会话进列表**，延续分支整条挡掉 | ✅「我之前那个 DM 怎么没了」 |
+| 2 | `service.py:211` `is_gateway` 字段 | `source not in ("cli","tui","desktop")` | 决定是否标 `is_gateway=true`（前端徽章/分组） | ❌ 列表仍可见，只是不被标 gateway |
+| 3 | 前端 `buildFilterOptions`/`PLATFORM_LABELS` | source 白名单 + label 映射 | 平台筛选下拉/分组标签 | ❌ 列表可见，筛选下拉不可见 |
+
+**易混淆：filter #1 vs filter #2**——两者都在 `service.py`，但**功能完全不同**。filter #1 是「可见性」（直接挡掉），filter #2 是「分类标记」（可见但分组不同）。归因错误最常出在这里：
+
+- ❌ 「列表里看不到」= source 被过滤 → 错（filter #2 只影响分类，不影响可见性）
+- ✅ 「列表里看不到」= parent_session_id 非空 → 对（filter #1 真凶）
+- ✅ 「分组里看不到」= source 不在 PLATFORM_LABELS → 对（filter #3，标签缺失）
+- ✅ 「跨平台混在一起」= is_gateway 标错 → 对（filter #2 改打标）
+
+**列表行为数据层基准（2026-08-19 实测全志越飞书 DM）**：
+
+```
+session_id                        parent                          title                                msgs   列表可见
+20260817_120209_80446d70          (NULL)                          空镜:天上月亮隐在云层中...           7     ✅
+20260819_095548_fe29d7d2          20260817_120209_80446d70        白泽夜阑莉莉丝互动片段              23     ❌
+20260819_102858_831e7f3a          (NULL)                          改写夜阑与林虽然亲密互动分镜        1     ✅
+20260813_103303_a89a4e61          20260812_175123_32166647        特写,固定拍摄挂件的触须...           13     ❌
+```
+
+诊断步骤（用户报「这个会话找不到」时的固定流程）：
+1. **取到 session_id 或 chat_id**——从飞书消息链接 `oc_xxx` / state.db SQL 反查
+2. **查 state.db 的 sessions 表**（⚠️ 无 created_at 列；用 started_at/last_activity_at）：
+   ```sql
+   SELECT id, title, source, parent_session_id, chat_id, started_at, last_activity_at, message_count
+   FROM sessions WHERE id='<session_id>' OR chat_id='<chat_id>'
+   ORDER BY started_at DESC;
+   ```
+3. **逐条判断过滤层**——`parent_session_id` 非空 → filter #1 命中；`source` 不在 PLATFORM_LABELS → filter #3 命中；`source in ("cli","tui","desktop")` → filter #2 is_gateway=false（不影响可见性）
+4. **给用户解释真因 + 解决方案**——不是「列表有 bug」，是「这是设计取舍：列表只列顶层，子分支折叠显示」
+
+**修复方向（DSH 已派工实施中）**：filter #1 改为「顶层会话 + 同 chat_id 聚合 child_count/child_sessions 徽章」，子分支点开可见（不可删/不可重命名，避免误操作）。frontend 同步加 `+N` 徽章组件。
+
+**对话分诊口诀（用户报「会话找不到」时一次问清）**：
+- 「你说的会话 ID 是？」（或消息里抓）
+- 「是不是飞书 DM？」→「极可能延续分支被 filter #1 挡了」
+- 「渠道会话管理 Tab 里有吗？」→ 是 = filter #3 平台分组问题；否 = filter #1 真凶
+- 「SQL 直查在吗？」→ 在 = 过滤层问题；不在 = 数据层问题（极少见）
+
+**相关但不同的注意点**（不要混）：
+- 评论会话不在任何列表（v1.0.0 §「评论会话不在任何会话列表 API 中」已讲）——是数据源问题，**不是 filter #1**
+- 续接会话（bot 主动私信，parent end_reason=daily/session_reset）→ 影响**桌面侧边栏**（`list_sessions_rich`），**不影响渠道会话管理列表**（channel-sessions 是独立后端）
+- 两者修复方向也不同：续接走 hermes_state.py 投影扩展；filter #1 走 service.py 聚合 child_count
+
+---
 
 ## 渠道会话 busy input 行为（用户发消息的处理逻辑，2026-08-11 实测）
 
