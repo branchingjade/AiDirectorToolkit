@@ -17,8 +17,8 @@ metadata:
 
 - **Hermes 正本**：`C:\Users\HMSJ\AppData\Local\hermes\skills`（Hermes 官方 skill 库，同步脚本的 DST 也在这里，git 正本 → AiDirectorToolkit）。
 - **DSH 实体副本**：`C:\Users\HMSJ\.dsh\skills` —— 2026-08-19 起从 junction 换成 **robocopy 实体拷贝**（排除 `.git`/`.hub`/`.curator_backups`/`.archive`）。**两侧不再自动同步**。
-- DSH 通过 `customSkillDirs`（hermes-cordis preset）读取副本下的**分类子目录**（devops、scriptwriting、妖玉影视、film-production、post-production、lark 等），使二级 skill 可发现。
-- DSH 默认 preset = `hermes-cordis`（cordis 副本 + 上述二级目录），新会话生效。
+- DSH 通过 `customSkillDirs`（creator preset，2026-08-19 由 hermes-cordis 改名）读取副本下的**分类子目录**（devops、scriptwriting、妖玉影视、film-production、post-production、lark 等），使二级 skill 可发现。
+- DSH 默认 preset = `creator`（cordis 副本 + 上述二级目录），新会话生效。
 - 技能格式两侧一致（`SKILL.md` + YAML frontmatter，必需 `name`/`description`），无需转换。
 
 ## 写 skill 约定
