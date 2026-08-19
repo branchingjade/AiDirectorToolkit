@@ -2,7 +2,7 @@
 name: hermes-dsh-fusion
 description: DSH×Hermes 无缝融合——DSH 是 Hermes 默认执行引擎（本机 127.0.0.1:8080）。全部场景默认走 DSH：工程执行/创作推敲/协作起草/渠道辅助/调研分析/插件评估，Hermes 管渠道工具最终执行。触发：DSH、bridge、融合、降级、轨迹回流、反向通道、events.mux、dsh-inbox 插件、mux-token。
 whenToUse: 默认加载——收到任务先考虑是否走 DSH 引擎（除渠道工具最终执行/简单问答外）；用户未指定即按默认走 DSH。决策由 Hermes（agent）判断，桥（代码）执行。
-version: 2.3.1
+version: 2.3.2
 author: Hermes Agent
 license: MIT
 metadata:
@@ -400,6 +400,16 @@ registry 文件：`.hermes/dsh-registry.json`（`list` 可查投递/复用统计
 
    完整代码修复 / 状态映射表 / 续投决策树 / 栈选择表见 `references/turn-end-reason-and-stdout-truncation.md`。
 
+20. **端到端测试 dsh_bridge 的 monkeypatch 必须改 `__dict__['rpc']`（2026-08-19 实测坑 4 个）**。给 `scripts/test_dsh_bridge_p0.py` 写姐妹测试 `test_dsh_bridge_p0_e2e.py` 时踩了 4 个坑（DSH 审查 M1 critical 的修复）：
+    1. **monkeypatch 目标必须是 `br.__dict__['rpc']`**——`run_task` 内部裸调 `rpc(...)` 走 module global namespace，改 attribute 不触发裸调用。`assert br.__dict__['rpc'] is fake_rpc` 硬保证生效。
+    2. **stateful fake 不依赖队列深度**——run_task 轮询 `session.history` 次数不确定（5-10 次），队列 pop 模式在第 5+ 次返回空 → 假 timeout。用 `hist_call_count = [0]` 状态计数：第 1 次返回空（base_evs，让 `last_seq=0`），第 2+ 次返回带 turn/end 的事件流。
+    3. **`base_evs` 必须返回空 events**——`run_task` 第 481 行 `last_seq = max(seq in base_evs)`，如果 base_evs 含带 seq=N 的 turn/end，后续 `cur_new = [e for e in evs if seq > N]` 永远过滤掉 turn/end → 永久 timeout。
+    4. **fake 必须返回解包后的 RPC schema**——`workspace.create` 返回 `val["workspace"]["workspaceId"]`（嵌套一层）；`session.history` 返回 `val["events"]`；`session.create` 返回 `val["sessionId"]`。**不要包 result 包装**——桥代码 `rpc(...).["xxx"]` 是直接索引，包 `{"result": {...}}` 会 KeyError。
+
+    另外**`run_task` 不返回值**——所有信息走 stdout 末尾的 `BRIDGE_RESULT {json}` 行。测试用 `contextlib.redirect_stdout(buf)` + 解析 BRIDGE_RESULT JSON。
+
+    **验收标准**：测试套件必须 7/7 全过 + 把代码回退到修复前测试必须红（S7 反证）。跑法：`python scripts/test_dsh_bridge_p0_e2e.py`（退出码 0 = 全过）。详细实现见 `references/turn-end-reason-and-stdout-truncation.md` "端到端测试的关键技巧" 节。
+
 ## 反向通道（DSH → Hermes 推送用户回答）
 
 **v1.2（2026-08-19 18:55 终态）：DSH mux-token 机制 + Hermes 桌面插件 `dsh-inbox/plugin.js`**
@@ -411,6 +421,13 @@ registry 文件：`.hermes/dsh-registry.json`（`list` 可查投递/复用统计
 - `connect()` 时构造 `?token=${encodeURIComponent(token)}` 拼到 ws URL
 - 监听 `question/requested` 帧 → 调 `host.notify({ kind: 'warning' })` + `ctx.os.notify(...)` 双通道通知 → 弹 toast + 系统通知 + 右上角图标徽标
 - 用户在 DSH web 回答后 → DSH 推 `question/resolved` 帧 → 插件自动移除 pending 条目
+
+**插件端 token 加载——必须走后端不能 `require('fs')`**：Electron 渲染进程默认 sandbox=true + nodeIntegration=false，**`require('fs')` 在前端插件里抛错**。插件调 `ctx.rest('/token')` 走本插件后端（`dashboard/plugin_api.py` 的 FastAPI 路由），后端在 Hermes 主进程有 fs 权限，读 `~/.dsh/.mux-token` 返回 token。插件持久化到 `ctx.storage` 避免反复 fetch。
+
+**最小后端骨架**（`dashboard/manifest.json` + `dashboard/plugin_api.py`，注册到 `/api/plugins/dsh-inbox/<route>`）：
+- `GET /token` → `{token, port, wsUrl}`（直接读 `~/.dsh/.mux-token`）
+- `GET /health` → `{dsh_home, token_file_exists, dsh_listening_port}`（排错用）
+- `GET /probe` → 服务端视角 WS 握手测试（带 token / 不带 token 三种 Origin 场景）
 
 **关键实现点**（DSH 自己设计的方案，2026-08-19 实测验证）：
 - 浏览器/桌面 webview 必然带 `Origin: null`/具体 Origin，DSH trust 拒 403
