@@ -20,7 +20,7 @@ description: 绿联 NAS（UGOS/Debian）部署服务完整模式——paramiko S
 
 **正确认知（2026-08-17 用户纠正后定稿）**：`hmsj.local` 一直是通的——浏览器/日常应用解析 `.local` 域名走 **mDNS 组播（UDP 5353）**，Clash TUN 的 fake-ip 劫持的是**系统 DNS 查询**（198.18.0.2），两条路径互不相干。
 
-- **测试工具选择是本次误判的根因**：`nslookup hmsj.local` 走系统 DNS → 返回 fake-ip（198.18.0.220）→ 曾误判「域名被劫持不可用」；而 `Resolve-DnsName hmsj.local` 走 mDNS → 返回真实 IP（192.168.1.176）。**验证 `.local` 域名必须用 `Resolve-DnsName`**，curl 也会踩系统 DNS 的坑。
+- **测试工具选择是本次误判的根因**：`nslookup hmsj.local` 走系统 DNS → 曾返回 fake-ip（198.18.0.220）→ 误判「域名被劫持不可用」；而 `Resolve-DnsName hmsj.local` 走 mDNS → 返回真实 IP（NAS 当前 IP）。**验证 `.local` 域名必须用 `Resolve-DnsName`**，curl 也会踩系统 DNS 的坑。**2026-08-18 后 Clash 的 fake-ip-filter 已含 `*.local`，nslookup 也返回真实 IP**——但仍以 `Resolve-DnsName` 为准。
 - **命令行工具（curl/ssh/脚本）兜底**：hosts 文件加 `<当前NAS IP> hmsj.local nas.local`（hosts 优先级高于任何 DNS，绕过 fake-ip）——本机命令行即可稳定用域名。hosts 只对本机生效，其他设备要各自配 hosts 或路由器 DNS。**NAS 漂 IP 后必须同步改 hosts**（管理员权限编辑 `C:\Windows\System32\drivers\etc\hosts`）。
 - **mDNS 域名天然抗 IP 漂移**：NAS 换 IP 后重新广播 `hmsj.local → 新IP`，局域网设备自动跟随——比写死 IP 更稳，工作站访问优先用域名。
 - **绕不开的例外**：`davinci-pg` 的 compose 端口绑定必须写具体 IP（UGOS 自带 PG 占 127.0.0.1:5432，绑 0.0.0.0 会 EADDRINUSE）——NAS 换 IP 时唯一要手动改的地方。**Resolve 的 .bkey 支持 hostname（2026-08-17 用户 Import Key 实测通过）**——`HMSJ.resolvedbkey` 的 `hostIPAddress` 已正式改为 `hmsj.local`，工作站连库从此免疫 IP 漂移。做法：`nas.py get` 下载 → 本地替换 hostIPAddress → `nas.py put` 覆盖写回 → 读回校验关键字段；测试版先放 `HMSJ-xxx-test.resolvedbkey` 让用户在 Database Manager → Import Key 实测，通过后再覆盖正式版并删测试文件。原文件编辑前先备份思路同上（compose 是 .bak、bkey 是测试版先行）。
@@ -51,7 +51,7 @@ stdin, stdout, stderr = ssh.exec_command("uname -a")
 import paramiko
 ssh = paramiko.SSHClient()
 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-ssh.connect("192.168.1.176", username="HMSJadmin", password="<向用户要>", timeout=10)
+ssh.connect("hmsj.local", username="HMSJadmin", password="<向用户要>", timeout=10)
 sftp = ssh.open_sftp()
 
 # 读（大文件 18MB 实测 OK）
@@ -166,7 +166,7 @@ UGOS 自带 Python 3.11 但没有 pip：
 
 达芬奇多工作站共享项目库：NAS 跑 postgres:13 容器，工作站直连网络库（Resolve 18.5+ 协作无需独立 Project Server 程序，右键项目 Enable Multi-User Collaboration）。正本 `~/Documents/Hermes/Projects/davinci-resolve-server/`（deploy.py 一键部署），NAS 端 `/volume1/docker/davinci-resolve/`。
 
-**端口共存方案（关键坑）**：绿联 UGOS 系统自带 PostgreSQL 15 占用 `127.0.0.1:5432` 和 `127.0.0.1:5433`（照片/视频/音乐服务依赖，不可动）。Docker 端口映射绑定**具体局域网 IP** `192.168.1.176:5432:5432`——Linux 允许具体地址与回环地址同端口共存（ss 验证：127.0.0.1:5432 与 192.168.1.176:5432 同时 LISTEN）。Resolve 连 192.168.1.176:5432 即达容器。若绑定 0.0.0.0:5432 会 EADDRINUSE 失败。
+**端口共存方案（关键坑）**：绿联 UGOS 系统自带 PostgreSQL 15 占用 `127.0.0.1:5432` 和 `127.0.0.1:5433`（照片/视频/音乐服务依赖，不可动）。Docker 端口映射绑定**具体局域网 IP** `<当前NAS IP>:5432:5432`（如 192.168.1.2:5432:5432）——Linux 允许具体地址与回环地址同端口共存（ss 验证：127.0.0.1:5432 与 <NAS IP>:5432 同时 LISTEN）。Resolve 连 <NAS IP>:5432 即达容器。若绑定 0.0.0.0:5432 会 EADDRINUSE 失败。
 
 **NAS 换 IP 后服务不可达的根因（2026-08-17 实测）**：NAS DHCP 换 IP（192.168.1.2→192.168.1.176）后，`davinci-pg` 容器健康但 5432 全网不可达——因为 compose 端口绑定写死旧 IP `192.168.1.2:5432:5432`，绑定地址失效。**修复**：`sed -i 's/旧IP/新IP/' docker-compose.yml && docker compose up -d`（保留原文件 .bak 再改）。**诊断链**：ping 通但所有端口 closed + ARP MAC 是本地管理位（虚拟 MAC）→ 直接扫网段找新 IP（绿联管理口 9999 + 目标服务端口）。**防复发**：NAS 上设静态 IP 或路由器 DHCP 保留（2026-08-17 时进不了网关后台，暂缓）；**工作站侧已免疫**——`HMSJ.resolvedbkey` 的 hostIPAddress 填 `hmsj.local`（mDNS 域名，实测 Resolve 支持），NAS 换 IP 后工作站自动跟随，无需重导密钥；只有 NAS 上 compose 端口绑定这处要手动改（见「mDNS 域名访问」节）。
 
@@ -174,9 +174,11 @@ UGOS 自带 Python 3.11 但没有 pip：
 
 **备份**：backup sidecar 容器（alpine + postgresql16-client，pg_dump 高版本可 dump PG13 库），每日 02:00 `pg_dump -Fc` 保留 14 天；alpine apk 换清华源 sed 替换必须只换域名（`s#dl-cdn.alpinelinux.org#mirrors.tuna.tsinghua.edu.cn#g`），带 `/alpine` 后缀会成双路径 404。compose depends_on 用 `condition: service_healthy` 等 PG ready。
 
-**验证链路**：容器内 psql（unix socket trust）≠ 真实链路——工作站侧必须 TCP + scram 密码认证实测（本机 psycopg2 connect 192.168.1.176 执行 SELECT）。TCP banner recv 超时是正常现象（PG 等客户端先发 StartupMessage）。
-- **本机 psycopg2 损坏时的替代验证（2026-08-17 实测）**：hermes venv 的 psycopg2 缺 `_psycopg` 扩展（ModuleNotFoundError，已知损坏）——**backup 容器自带 postgresql 客户端，走真实 TCP + scram**：`docker exec davinci-pg-backup sh -c 'PGPASSWORD=<密码> psql -h 192.168.1.176 -p 5432 -U resolve -d HMSJ -c "SELECT version();"'`——与工作站同款链路，比修本机 psycopg2 快。
+**验证链路**：容器内 psql（unix socket trust）≠ 真实链路——工作站侧必须 TCP + scram 密码认证实测（本机 psycopg2 connect <当前NAS IP> 执行 SELECT）。TCP banner recv 超时是正常现象（PG 等客户端先发 StartupMessage）。
+- **本机 psycopg2 损坏时的替代验证（2026-08-17 实测）**：hermes venv 的 psycopg2 缺 `_psycopg` 扩展（ModuleNotFoundError，已知损坏）——**backup 容器自带 postgresql 客户端，走真实 TCP + scram**：`docker exec -e PGPASSWORD=<密码> davinci-pg-backup psql -h <当前NAS IP> -p 5432 -U resolve -d HMSJ -t -A -c "SELECT version()"`——与工作站同款链路，比修本机 psycopg2 快。
 - **工作站侧验证 = 读 Resolve 配置文件（2026-08-17 实测）**：`%APPDATA%\Blackmagic Design\DaVinci Resolve\Preferences\` 下三个文件直接暴露连接状态，无需开 GUI：`activedb.conf`（当前激活库，格式 `network*:HMSJ<IP>`）、`dblist.conf`（全库列表，格式 `<名><IP>:<IP>:<user>*:<pwd>:<db>:QPSQL`，密码明文）、`recentprojects.conf`（最近项目历史——**可能残留旧 IP 的历史条目，只影响「最近项目」显示，不影响连接，别当故障**）。换 IP 后先读这些文件判断工作站侧是否已更新，再决定要不要重导 .bkey。
+
+- **`dblist.conf` 残留死行 → Resolve 弹「无法与协作者沟通」（2026-08-20 实测）**：NAS IP 漂移后 mDNS 域名行（如 `HMSJhmsj.local:hmsj.local:resolve*:b81...:HMSJ:QPSQL`）已更新正确，但旧 IP 行（如 `B192.168.1.3:192.168.1.3:postgres:DaVinci:B:QPSQL`）**没有跟着删**，Resolve 启动时仍会尝试 ping 这一行 → 连不上就弹「无法与协作者沟通：无法连接到192.168.1.3」。**判别铁律**：弹窗里的 IP 跟 `dblist.conf` 任一行 host 对得上 + NAS 实际 IP 对不上 = 死行残留；跟 NAS 实际 IP 对得上 = NAS 端问题（先 docker exec pg_isready + ss -tlnp 排查 NAS）。**修法**：①先备份 `cp dblist.conf dblist.conf.bak_$(date +%Y%m%d_%H%M%S)`（与 compose .bak 同款时间戳模式）②删死行（保留 `Local Database` 当前激活库两行即可）③Resolve **必须重启**才重读 dblist.conf（改文件本身不会热加载）——`Stop-Process -Name Resolve -Force` 后用户手动启动。**强关 Resolve 的副作用**：未保存修改直接丢，开 Resolve 时可能弹 dirty shutdown 恢复——GUI 启动后留意。**8-18 hosts 修复后务必复查 dblist.conf 是否清干净**，不是改 hosts 就自动生效的（hosts 只解决命令行连、dblist.conf 是 Resolve 自己的配置）。
 
 **密钥导出格式（用户要求，2026-08-13）**：用户密钥目录（`/HMSJ_B/密钥/`，Y 盘）里的凭据用 **Resolve 官方数据库访问密钥 .bkey**（XML，可 Database Manager → Import Key 一键导入），不是 txt 说明文档——先看目录里现有同类型文件的格式再导出。命名 `<库名>.resolvedbkey`（已有 B.resolvedbkey 先例）。XML 结构：`<DBAccessKey><hostIPAddress><dbName><dbUsername><dbPassword></DBAccessKey>`。凭据文件一律不入 git（本地 .gitignore 加 `*.resolvedbkey`）。
 
@@ -285,7 +287,7 @@ OpenAI 兼容 `/v1/chat/completions`（无状态，每次请求带完整 message
 | replace_all 误伤非 focus 语境 | 逐个修复 6 处 | — |
 
 审计细节与 commit 记录见 `references/doubao-tts-case.md`「UI 审计优化」节。
-1. Clash TUN 劫持内网流量 → 必须用局域网 IP（192.168.1.176），不能用 mDNS。
+1. **Clash TUN 只劫持走系统 DNS 的解析**——mDNS 组播（UDP 5353）不受影响，浏览器/日常应用解析 `.local` 域名正常；命令行工具靠 hosts 兜底（见「mDNS 域名访问」节，2026-08-17 定稿结论）。
 
 ### UI 部署后审计优化：知识库驱动 + 逐页截图（2026-08-11 模式）
 
