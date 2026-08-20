@@ -202,6 +202,28 @@ UPDATE "SM_Project" SET "AllSysIds" = regexp_replace("AllSysIds", '(^|,)<死SysI
 
 **铁律**：改库前**本机 Resolve 必须完全退出**（运行中会缓存并在退出时写回，覆盖修改——实测 PID 还在跑时改无效）。改完重启 Resolve 验证；若还想用协作，需先修好死机器的 50059（防火墙放行 / 重开协作）。
 
+### 3.6 协作防火墙放行（Windows 工作站，2026-08-20 实测）
+
+Resolve 多用户协作的端口需求：**TCP 5432**（连 NAS 库，出站默认放行）+ **TCP 50059**（工作站之间点对点协作同步，**入站需放行**——每台参与协作的机器都要允许别人连自己的 50059）+ UDP 5353（mDNS 发现）。
+
+**放行命令**（在目标工作站以**管理员**身份运行，任选其一）：
+```powershell
+# PowerShell（管理员）
+New-NetFirewallRule -DisplayName "DaVinci Resolve Collab 50059" -Direction Inbound -Protocol TCP -LocalPort 50059 -Action Allow -Profile Private,Domain
+```
+```cmd
+:: CMD（管理员）
+netsh advfirewall firewall add rule name="DaVinci Resolve Collab 50059" dir=in action=allow protocol=TCP localport=50059 profile=private,domain
+```
+
+**验证**：
+```powershell
+Get-NetFirewallRule -DisplayName "DaVinci Resolve Collab 50059" | Select-Object DisplayName, Enabled, Direction, Action
+netstat -ano | findstr 50059   # 需该机 Resolve 已启用协作后才会监听
+```
+
+**放行后配套**：① 该机 Resolve 项目管理器 → 项目右键 → Collaboration → **Enable Multi-User Collaboration**（若服务器侧已关过协作需重新启用）；② 所有工作站连同一个库（HMSJ@192.168.1.2:5432）；③ 若放行后仍不通，查该机 `netstat -ano | findstr 50059` 是否在监听 + 双方 mDNS 是否可达。不参与协作则无需放行，保持协作关闭即无报错。
+
 ## 四、日常维护
 
 ### 4.1 NAS IP 变更后必做
