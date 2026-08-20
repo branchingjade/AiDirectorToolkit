@@ -80,7 +80,7 @@ TEMPLATE_LINKS = frozenset({
     'A', 'B', '^', 'xxx', 'xxx 复盘', 'xxx 集成',
     '关联A', '关联B', '子目录/笔记名', '新笔记名',
     '笔记A', '笔记B', '笔记名', '项目笔记',
-    'wikilink', 'wikilinks',
+    'wikilink', 'wikilinks', '路径/名',
 })
 
 
