@@ -2,13 +2,17 @@
 name: hermes-dsh-fusion
 description: DSH×Hermes 无缝融合——DSH 是 Hermes 默认执行引擎（本机 127.0.0.1:8080）。全部场景默认走 DSH：工程执行/创作推敲/协作起草/渠道辅助/调研分析/插件评估，Hermes 管渠道工具最终执行。触发：DSH、bridge、融合、降级、轨迹回流、反向通道、events.mux、dsh-inbox 插件、mux-token。
 whenToUse: 默认加载——收到任务先考虑是否走 DSH 引擎（除渠道工具最终执行/简单问答外）；用户未指定即按默认走 DSH。决策由 Hermes（agent）判断，桥（代码）执行。
-version: 2.4.0
+version: 2.5.1
 author: Hermes Agent
 license: MIT
 metadata:
   hermes:
     tags: [DSH, DeepSeek-Harness, 执行引擎, 融合, 默认]
     related_skills: [hermes-workspace-conventions, hermes-dsh-skill-sync]
+    changelog:
+      - 2.5.1 (2026-08-20): 记忆层切换 MemOS——记忆共享写入规范改为 MemOS（NAS :8001，memos.py CLI），Hindsight 停用保留可回滚
+      - 2.5.0 (2026-08-20): 坑 21 路径 C 第二刀落地（commit `078f407` 桥 CLI source 缺失硬性 warn）+ 坑 22 补充「计划任务命名陷阱」+ 坑 23 新增（source hard warn）+ 计划任务改名 `Hermes_DSH_Inbox_Watcher` → `DSH_Mux_Listener_Polling` 全栈同步
+      - 2.4.0 (2026-08-20): 坑 21 路径 C 第一刀（commit `2630cfc` 砍监听器 cwd 兜底）+ 坑 22（zombie listener）+ 记忆共享写入规范
 ---
 
 # Hermes × DSH 无感融合（DSH 默认引擎版）
@@ -247,16 +251,16 @@ registry 文件：`.hermes/dsh-registry.json`（`list` 可查投递/复用统计
 - Obsidian / skill：文件系统直接 glob/read（Vault = `C:\Users\HMSJ\Documents\KnowledgeBase\Obsidian Vault`）
 - ⚠️ Hindsight daemon 空闲自动停（idle_timeout）：recall 报不可达时，让 Hermes 先 retain/recall 拉起，或降级问 Hermes
 
-### 记忆共享写入规范（2026-08-20 用户拍板：记忆共享，必要时注明来源即可）
+### 记忆共享写入规范（2026-08-20 拍板；**记忆层已切 MemOS**）
 
-- **Hindsight 记忆库 = Hermes × DSH 共享写入**：DSH 会话可直接 retain（不再要求经 Hermes 中转），写入时**注明来源**
-- **什么时候写**：任务收尾的结论性内容（决策/事实/教训——同 Hermes retain 标准：跨会话要复用、值得长期记住）；过程噪音不写，拿不准宁可不写（记忆克制）
-- **来源标注**（审计追溯 + 冲突时定优先级）：
-  - tags 固定带：`source: dsh`、`session: <sid>`（或 `route: <任务线>`）
-  - 重要/可能推翻旧结论的条目，content 里写明「来源：DSH 会话 <sid>（任务线 <route>）」——可附「本条目推翻旧记忆…」声明，recall 以新条目为优先
-- **格式**：`POST http://localhost:9177/v1/default/banks/hermes/memories`，body `{"items": [{"content": "...", "tags": ["DSH", "source: dsh", "session: <sid>"]}]}`；**超时给足 120s+**
-- **审计可查**：`~/.hindsight/profiles/hermes.log` 有 retain 记录；记忆审计 cron（`2ad7b042825d`）会扫；来源标注让「唯一出口」演化为「来源可追溯」
-- **Hermes 的角色**：不再强制中转，但保留补充整理权（DSH 写漏/写偏时 Hermes 可补写或修正）
+> **记忆系统 2026-08-20 切换：MemOS（NAS hmsj.local:8001 独立服务）替代 Hindsight 成为 Hermes×DSH 共享记忆库**（四容器：memos-api+neo4j+qdrant+postgres；embedding=硅基流动 bge-m3；提炼=mimo-v2.5）。Hindsight 停用但数据保留（pg0 + `分析/memos-migration/hindsight_export.jsonl` 9722 条），config `memory.provider: memos`，回滚=改回 hindsight。
+
+- **MemOS 记忆库 = Hermes × DSH 共享**：DSH 会话用 `python scripts/memos.py search/remember`（CLI 自动读 key），写入注明来源
+- **什么时候写**：任务收尾的结论性内容（决策/事实/教训——跨会话要复用、值得长期记住）；过程噪音不写（**写入门控：只写结论，日常提炼成本 <0.5 元/天**）
+- **来源标注**（审计追溯 + 冲突定优先级）：content 带 `[DSH:<会话>]` 或 `[Hindsight:xxx]` 前缀；重要条目写明来源
+- **格式**：CLI `memos.py remember "[DSH:<sid>] <结论>"`；或 REST `POST http://hmsj.local:8001/product/add`（Bearer API key）
+- **成本**：检索（prefetch）= 只 embedding（≈0）；写入（sync_turn）= 提炼 LLM（低频、内容短）
+- **审计可查**：MemOS neo4j/qdrant + Hermes provider 日志；来源标注可追溯
 
 **其余写类渠道仍归 Hermes（DSH 不碰，审计边界 + git 唯一写者纪律）**：
 - 飞书发送、cron 新增/修改、Obsidian 写入、git —— 全部由 Hermes 执行；DSH 需要这些动作时经 BRIDGE_RESULT / NEED_INPUT / 收尾 check 回流给 Hermes
@@ -433,11 +437,58 @@ registry 文件：`.hermes/dsh-registry.json`（`list` 可查投递/复用统计
    - **全表诊断比单条诊断更准**：只看「hermes-7956064e 没在注册表里」会以为是单条遗漏，看到 121/121 全表无 source 才知道是「所有调用方都没传」的全局问题
    - **兜底分支要带告警**：当前兜底只 `log()` 不告警，121 条全走兜底都没人发现。修复时给兜底分支加「高频兜底=异常」飞书群通知（不是每个 session 推一次，是统计阈值触发，比如 5 分钟内兜底占比 > 80%）
 
-   **修复路径**（A vs B，待用户拍板）：
-   - A. 监听器兜底更聪明——只看代码层，但当前 cwd=Documents/Hermes 走桌面分支只留痕不推送 = 用户从飞书看到堆消息就是兜底失效证据，先查 `.hermes/dsh-mux-listener.log` 看实际走的是哪条
-   - B. 所有渠道入口带 source/owner——桌面 `--source desktop`、飞书 channel hub `--source feishu --owner <open_id>`、cron `--source cron`、DSH web UI 直发起需产品决策（`source=web`？）
+   **修复路径 C（用户拍板 2026-08-20）——砍兜底 cwd 判定、默认桌面留痕 + 上游硬性 warn（双管齐下，已落地）**：
+   - **A/B 路径被否**：用户明确表态「DSH web UI 直起的 session 跟 Hermes 桌面端一样，不需要回流飞书」。两个隐含推论：① 不必为 DSH web UI 引入 `source=web`（用户拍板否）；② 不必为全渠道入口回填 source/owner（修复路径 B 的复杂度没价值）
+   - **路径 C 第一刀（commit `2630cfc`）**：监听器兜底分支从「cwd 判定」改成「默认桌面留痕，不推送」。cwd 字符串判定整段删除（cwd 不可靠：DSH 服务端启动目录 ≠ 发起人 cwd）
+   - **路径 C 第二刀（commit `078f407`）—— 上游硬性 warn**：cwd 含 `Documents/Hermes` 或 `Obsidian` 时 `--source` 必填（`desktop` / `feishu` / `cli` 三选一），否则 `sys.exit(2)` 报错退出。其他 cwd（如 `/tmp` 测试、外部自动化）允许不传——把上游忘记的成本转移到调用方，比静默吞掉好。4 case 实测：cwd=Hermes 无 source 报错 / cwd=Hermes+desktop 正常 / cwd=Hermes+feishu+owner 正常 / cwd=/tmp 无 source 放过
 
-   详细诊断证据 + 实操清单（看 listener 日志 / 全表统计 / 回填验证）+ A vs B 对比表见 `references/dsh-reverse-channel-source-missing.md`。
+   **效果**：feishu+owner / feishu / desktop 三条显式分支保留 + 上游保险就位 + 未登记 session 默认桌面留痕——**用户已在终端（Hermes 桌面 / DSH web UI）看着，无回流必要；飞书渠道忘传 source 直接报错，不会再静默漏推**
+
+   详细诊断证据 + 实操清单（看 listener 日志 / 全表统计 / 回填验证）+ 路径 C 完整 patch 见 `references/dsh-reverse-channel-source-missing.md`。
+
+22. **zombie listener 进程不会重新加载代码（2026-08-20 实测，commit `2630cfc` 修复后仍踩）**。改了 `dsh_mux_listener.py` 后 commit，**DSH web UI 直起的提问仍按旧逻辑推到飞书妖玉 DM**——根因：
+
+   - 计划任务 `Hermes_DSH_Inbox_Watcher`（**误导性命名**：名字像 watcher 但实际跑的是 `dsh_mux_listener.py --once`）每分钟跑一次
+   - `--once` 模式先调 `check_alive()`：`wmic process where "name='pythonw.exe'" get commandline` → 看命令行是否含 `dsh_mux_listener` → 命中就 return 0 跳过
+   - 计划任务启动后 DSH 服务端是 up 状态、且没有别的 listener 进程 → 走 `not-running` 分支 → `sys.exit(run_forever())` → 进程**常驻 ws 监听**，从 08:47 一直活到 10:02
+   - 后续每次 `--once` 计划任务都看到 alive → return 0 退出，**老进程不死，代码永远是 commit 之前的旧版本**
+   - 用户问「刚才 DSH WEB 直起的会话也回流了」——但**新代码已 commit 在磁盘**，`git status` 干净，commit hash 也对
+   - **诊断口诀**：「修复没生效，先 `ps` 看 listener 进程的 StartTime 是 commit 之前还是之后；之前就是 zombie」
+   - **修法**：`powershell Stop-Process -Id <PID> -Force` → 让下次 `--once` 重新拉起 `run_forever()` 加载新代码 → 新进程 StartTime 必然是 commit 之后
+   - **根治方向（未来再修）**：`check_alive()` 应该**比对代码 mtime 或 commit hash**，发现代码变了就强制重启进程——但当前实现只看进程存在性，存在 zombie 风险
+   - **审计纪律**：改 listener 类长驻进程的代码 → commit 之后**立即查进程 StartTime**，必要时主动 kill 而不是等自然过期（DSH_Watchdog 守护的是 DSH web 进程，不是 listener——没人替 listener 做这件事）
+
+   **计划任务命名陷阱（2026-08-20 同会话连踩两次）**：因为旧任务叫 `Hermes_DSH_Inbox_Watcher`，名字让人以为跑的是 dsh_inbox_watcher.py（已弃用），而实际跑的是 dsh_mux_listener.py。**这导致 agent 在推理时反复判断错「监听器状态」**——误以为 listener 撤了、inbox 插件在跑；事实正好相反。**改名（commit 无代码改动，schtasks delete + create）→ `DSH_Mux_Listener_Polling`**。命名约定：**计划任务名 = 实际跑的脚本去掉 .py 后缀，加 _Polling/_Watchdog/_Health 后缀表明行为**；不要混用「Inbox/Watcher/Listener」这些会让人推断错的词。
+
+   完整时间线证据 + kill 流程 + 新进程 PID 对比 + 命名规范 见 `references/dsh-mux-listener-zombie-pitfall.md`。
+
+23. **桥 CLI 入口硬性 warn——飞书渠道漏传 source 直接拒绝（2026-08-20 commit `078f407`）**。坑 21 的修复只砍了监听器兜底分支，但**没解决上游**：飞书渠道起的 session 如果桥忘传 `--source`，v3 注册表照旧无 source 字段，监听器照样走「未登记 → 留痕」分支 → **用户收不到回流**。`cwd 兜底砍了`不等于「路由一定能命中」。
+
+   **修法**：在 `dsh_bridge.py` CLI `run` 子命令解析完后、`run_task` 调用前，加 cwd-based 必传检查：
+   ```python
+   cwd_norm = cwd.replace("\\", "/")
+   if not source and ("Documents/Hermes" in cwd_norm or "Obsidian" in cwd_norm):
+       print(
+           f"✗ 路由参数缺失：cwd={cwd} 属于 Hermes 工作区，必须显式传 --source。\n"
+           f"  飞书渠道：--source feishu [--owner ou_xxx]\n"
+           f"  桌面：    --source desktop\n"
+           f"  CLI/手动：--source cli",
+           file=sys.stderr,
+       )
+       sys.exit(2)
+   ```
+
+   **设计原则**：
+   - **cwd 是 Hermes 工作区（含 Documents/Hermes 或 Obsidian）** → `--source` 必填（`desktop` / `feishu` / `cli` 三选一），否则报错退出。**「把上游忘记的成本转移到调用方」**，比让监听器靠 cwd 猜好
+   - **cwd 在其他位置**（`/tmp` 测试、外部自动化、第三方项目）→ 允许不传 `--source`——这是合理的逃生口，不应该强制要求
+
+   **4 case 实测**（commit 验证）：cwd=Hermes 无 source 报错退出 / cwd=Hermes+desktop 正常 / cwd=Hermes+feishu+owner 正常 / cwd=/tmp 无 source 放过
+
+   **跟坑 21 的分工**：坑 21 是「监听器兜底分支砍掉 cwd 兜底推飞书」（防误推）；坑 23 是「桥 CLI 入口必传 source」（防漏配）。**两者双管齐下**：坑 21 防住「已发生的旧 session」路由错；坑 23 防住「新建的飞书渠道 session」漏 source。
+
+   **遗留 cron 调桥是否需要 patch**：Hermes 桌面派活 / 飞书 channel hub 派活 / cron 派活的入口需要扫描一遍——如果有任何 `dsh_bridge.py run <cwd> <task>` 的调用 cwd 是 `Documents/Hermes` 但没加 `--source`，会立刻被坑 23 拦截报错。这是**预期行为**：逼着上游补参数，而不是让监听器猜。
+
+   **关联**：坑 21（监听器砍 cwd 兜底）/ 坑 22（zombie 进程）/ SKILL.md 「桥 CLI」章节（`run_task` 签名）。
 
 ## 反向通道（DSH 提问 → 回到发起人所在渠道，「哪来的会哪去」）
 
@@ -447,10 +498,10 @@ registry 文件：`.hermes/dsh-registry.json`（`list` 可查投递/复用统计
 
 **架构（三件套）**：
 1. **桥带来源元数据**：`dsh_bridge.py run --source desktop|feishu|cron --owner <open_id>` 写入 registry（`source` + `owner` 字段）。Hermes 在飞书会话派活时传 `--source feishu --owner <发起人 open_id>`；桌面派活传 `--source desktop`；cron 传 `--source cron`（cron 不涉及提问，路由表无此分支）。
-2. **事件驱动监听器 `scripts/dsh_mux_listener.py`**（常驻，计划任务 `Hermes_DSH_Inbox_Watcher` 每 N 分钟 `--once` 保活）：
+2. **事件驱动监听器 `scripts/dsh_mux_listener.py`**（常驻，计划任务 `DSH_Mux_Listener_Polling` 每分钟 `--once` 保活）：
    - 连 `ws://127.0.0.1:8080/api/events.mux?token=<~/.dsh/.mux-token>`（mux-token 机制 8-19 打通）
    - 实时收 `question/requested` 帧（DSH agent 调 ask_user_question 的原生推送，apiproxy 推 mux 队列——api-proxy.ts:1363）
-   - 查 registry 该 session 的 source/owner 路由：`feishu+owner → 飞书 DM 推给发起成员本人`（`--user-id ou_xxx`）；`feishu 无 owner → 妖玉 DM`；`desktop → 就地（web 弹窗已显示）仅留痕`；无 source → 按 cwd 回退
+   - 查 registry 该 session 的 source/owner 路由：**`feishu+owner → 飞书 DM 推给发起成员本人`**（`--user-id ou_xxx`）；**`feishu 无 owner → 妖玉 DM`**；**`desktop → 就地（web 弹窗已显示）仅留痕`**；**未登记 → 默认桌面留痕，不推送**（commit `2630cfc` 砍掉了 cwd 兜底，见坑 21/22）
    - 收 `question/resolved` → 清理 pending
 3. **原生回答通道**：成员回复 → `dsh_inbox_reply.py --sid <id> --pick N/--text` → **`POST /api/respond`**（ClientResponse 信封：`type='client-response'` + `rpcId` + `result.value{sessionId, answer.answers[{id, selected}]}`，api-proxy.ts:3633）→ DSH 继续。比 session.prompt 干净（rpcId 精确应答，answers 数必须等于 questions 数，selected 用选项 label）。
 
@@ -520,7 +571,7 @@ registry 文件：`.hermes/dsh-registry.json`（`list` 可查投递/复用统计
 5. **修桥 cwd 规范化**（见 pitfall 13）—— 不修 session 落伪工作区
 6. **重建 DSH_Watchdog 计划任务**为每5分钟（解耦期可能被改 One Time Only + Disabled）
 7. **挂 hermes-dsh-fusion skill 到分析类 cron**（hermes cron edit `<job_id>` --add-skill hermes-dsh-fusion，不是 update——update 不存在）
-8. **从 Obsidian 还原分析/ 目录 + 建 Hermes_DSH_Inbox_Watcher 计划任务**（git 历史不一定全；commit message 列了 3 份但实际只 1 份进 git——git 历史是工作产物的辅助，Obsidian 才是）
-   额外：建 `Hermes_DSH_Inbox_Watcher` 计划任务（每分钟跑 `scripts/dsh_inbox_watcher.py`）——反向通道监听器
+8. **从 Obsidian 还原分析/ 目录 + 建 DSH_Mux_Listener_Polling 计划任务**（git 历史不一定全；commit message 列了 3 份但实际只 1 份进 git——git 历史是工作产物的辅助，Obsidian 才是）
+   额外：建 `DSH_Mux_Listener_Polling` 计划任务（每分钟跑 `scripts/dsh_mux_listener.py --once`）——v3 事件驱动反向通道监听器。**注意命名陷阱**（坑 22）：别再用 `Hermes_DSH_Inbox_Watcher` 这个名字——它会让人误以为跑的是 dsh_inbox_watcher.py（已弃用）。
 
 **端到端验证**：`scripts/dsh_bridge.py run "<cwd>" "hi" --route verify-fusion` → DSH 回 "hi" + BRIDGE_RESULT status=done + 复用同 sessionId（reused:true）。
