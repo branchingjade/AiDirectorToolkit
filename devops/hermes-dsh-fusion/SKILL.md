@@ -2,7 +2,7 @@
 name: hermes-dsh-fusion
 description: DSH×Hermes 无缝融合——DSH 是 Hermes 默认执行引擎（本机 127.0.0.1:8080）。全部场景默认走 DSH：工程执行/创作推敲/协作起草/渠道辅助/调研分析/插件评估，Hermes 管渠道工具最终执行。触发：DSH、bridge、融合、降级、轨迹回流、反向通道、events.mux、dsh-inbox 插件、mux-token。
 whenToUse: 默认加载——收到任务先考虑是否走 DSH 引擎（除渠道工具最终执行/简单问答外）；用户未指定即按默认走 DSH。决策由 Hermes（agent）判断，桥（代码）执行。
-version: 2.3.2
+version: 2.4.0
 author: Hermes Agent
 license: MIT
 metadata:
@@ -17,13 +17,14 @@ metadata:
 
 - **DSH 直连读类**（Hindsight recall/统计、cron 查看、Obsidian·skill 文件）——桥 `util` 命令
 - **DSH 执行类**（工程长任务/批量/调研分析/创作推敲/协作起草/插件评估/技能库维护）——桥 `run` 命令
-- **Hermes 单出口**（飞书发送/cron 增改/Hindsight 写入/Obsidian 写入/git 提交）——单出口审计纪律
+- **记忆共享写入**（Hindsight：DSH 可直连 retain，注明来源即可，2026-08-20 用户拍板）——见「记忆共享写入规范」
+- **Hermes 单出口**（飞书发送/cron 增改/Obsidian 写入/git 提交）——单出口审计纪律仅限渠道/正本类
 
 ## When to Use
 
 - 用户点名「用 DSH」（保留）
 - 显式决定用 DSH 执行的长任务/批量/调研/分析（判据见下）
-- **不再默认**：收到任务不再自动考虑 DSH 引擎参与；Hermes 自干为主（渠道工具最终执行、cron 调度、记忆写入本就归 Hermes）
+- **不再默认**：收到任务不再自动考虑 DSH 引擎参与；Hermes 自干为主（渠道工具最终执行、cron 调度归 Hermes；记忆共享写入——DSH 可直连 retain，注明来源）
 
 ## cwd 定位（同源锚的正确用法）
 
@@ -63,7 +64,7 @@ python scripts/dsh_bridge.py list
 
 **DSH web 启动与保活（2026-08-19 OOM 教训固化）**：
 - 启动命令**必须带 8GB heap 上限**（rc.7 升级后默认 heap 跑大任务会 OOM 崩溃）：`cd Projects/deepseek-harness && node --max-old-space-size=8192 --import tsx/esm apps/cli/src/bin.ts web --port 8080`
-- **自动保活**：计划任务 `DSH_Watchdog`（每 5 分钟）→ `scripts/dsh_watchdog.py`（工作区 git 管理，检测 8080 无监听即用上述命令拉起，10 分钟冷却防风暴；日志 `.hermes/dsh_watchdog.log`、状态 `.hermes/dsh_watchdog_state.json`）。看门狗失效排查：脚本文件丢失（曾因清理误删导致任务空转）或进程退出——重建脚本 + `schtasks /change /tn DSH_Watchdog /tr "pythonw <scripts路径>"`。
+- **自动保活**：计划任务 `DSH_Watchdog`（每 5 分钟）→ `scripts/dsh_watchdog.py`（工作区 git 管理，**2026-08-20 升级版 commit `515f726`**：HTTP 探测+命令行校验防三盲区，PID 存活追踪防双崩集群冷却延迟；日志 `.hermes/dsh_watchdog.log`、状态 `.hermes/dsh_watchdog_state.json` 含 `last_pid`/`last_pid_started_at`）。看门狗失效排查：脚本文件丢失（曾因清理误删导致任务空转）或进程退出——重建脚本 + `schtasks /change /tn DSH_Watchdog /tr "pythonw <scripts路径>"`。
 
 ## 什么时候用桥（默认用，精确判据）
 
@@ -174,9 +175,10 @@ DSH 报告"完成"只当线索。Hermes 独立验证：
 
 1. **git commit + push 正本**：有远程的仓库（技能库 → AiDirectorToolkit）commit 后必须 push，只 commit 不算归档
 2. **Obsidian 日志**：写当日日志 `日志/<年-月>/W<周>/<日期>.md`（frontmatter tags/date/related + 主题小节），记录任务/根因/修复/提交号
-3. **Hindsight retain**（Hermes 记忆层，recall 可达）：
-   - `POST http://localhost:9177/v1/default/banks/hermes/memories`，body `{"items": [{"content": "<结论>", "tags": ["DSH", ...]}]}`
+3. **Hindsight retain**（记忆共享写入，2026-08-20 起 DSH 可直连，注明来源）：
+   - `POST http://localhost:9177/v1/default/banks/hermes/memories`，body `{"items": [{"content": "<结论>", "tags": ["DSH", "source: dsh", "session: <sid>", ...]}]}`
    - item 字段是 **`content`**（不是 text）；**超时给足 120s+**（首次嵌入计算慢，20s 必超时）
+   - **来源标注**：tags 固定带 `source: dsh` + `session: <sid>`（或 `route: <任务线>`）；重要/可能推翻旧结论的条目，content 里写明「来源：DSH 会话 <sid>」并附「本条目推翻旧记忆…」声明——审计追溯与冲突定优先级用
    - 验证：`python scripts/dsh_bridge.py util hindsight recall "<关键词>" --limit 3` 能命中
    - ⚠️ hindsight daemon 空闲自动停（idle-timeout）：retain 报不可达时先让 Hermes 跑一次 retain/recall 拉起 daemon 再重试
 
@@ -216,7 +218,7 @@ registry 文件：`.hermes/dsh-registry.json`（`list` 可查投递/复用统计
    - 无需 Hermes 干预，压缩后会话继续（一次缓存全量重算，换后续 N 轮稳定命中）
    - ⚠️ 压缩丢细节可能导致后续走偏——收到 `compacted: true` 且结果可疑时，回退到档 2
 2. **阶段完成/要验收/要跨天/要并行 → Hermes 受控整理（白盒、可审计）**
-   - 让 DSH 把当前阶段写成摘要文件（含已完成/结论/待办/关键细节）→ Hermes 验收 + 关键结论 retain Hindsight（写类，归 Hermes）→ 桥 `--new` 同 route 重开，新任务书引用摘要文件
+   - 让 DSH 把当前阶段写成摘要文件（含已完成/结论/待办/关键细节）→ Hermes 验收 + 关键结论 retain Hindsight（记忆共享写入：DSH 可直连写注明来源，或经 Hermes 统一写）→ 桥 `--new` 同 route 重开，新任务书引用摘要文件
    - 等价于「手动 checkpoint」，但摘要内容 Hermes 验收过，可审计
 
 **触发线（经验值）**：会话轮次 ≥ ~40 轮或预计 10 轮内将满窗口时，Hermes 主动判断走哪档；以实际压缩事件（`compacted: true`）为准。
@@ -234,9 +236,9 @@ registry 文件：`.hermes/dsh-registry.json`（`list` 可查投递/复用统计
 - **压缩频繁**（compacted 多）→ 任务太长，该走「上下文用量管理」档 2 分段
 - **duration_s 异常大** → 任务书是否够薄、DSH 是否在低效试探
 
-## 资源访问边界（读类直连 / 写类经 Hermes）
+## 资源访问边界（读类直连 / 记忆共享写入 / 其余写类经 Hermes）
 
-「用 Hermes 的 X」≠「调用 Hermes agent」——cron/飞书/skill/Obsidian/Hindsight 是 Hermes 背后的**资源**。DSH 直连读类（知情自取），写类仍归 Hermes（保持单出口审计纪律，2026-08-17 已裁定「不建反向桥」）：
+「用 Hermes 的 X」≠「调用 Hermes agent」——cron/飞书/skill/Obsidian/Hindsight 是 Hermes 背后的**资源**。DSH 直连读类（知情自取）；**Hindsight 写入 2026-08-20 起共享（DSH 可直连 retain，注明来源即可）**；其余写类仍归 Hermes（单出口审计纪律，2026-08-17 已裁定「不建反向桥」）：
 
 **DSH 读类直连（不走 Hermes，省一次往返）**：
 - Hindsight 记忆召回：`python scripts/dsh_bridge.py util hindsight recall "<query>" [--limit N]`
@@ -245,8 +247,19 @@ registry 文件：`.hermes/dsh-registry.json`（`list` 可查投递/复用统计
 - Obsidian / skill：文件系统直接 glob/read（Vault = `C:\Users\HMSJ\Documents\KnowledgeBase\Obsidian Vault`）
 - ⚠️ Hindsight daemon 空闲自动停（idle_timeout）：recall 报不可达时，让 Hermes 先 retain/recall 拉起，或降级问 Hermes
 
-**写类渠道仍归 Hermes（DSH 不碰，审计边界 + git 唯一写者纪律）**：
-- 飞书发送、cron 新增/修改、Hindsight 写入、Obsidian 写入、git —— 全部由 Hermes 执行；DSH 需要这些动作时经 BRIDGE_RESULT / NEED_INPUT / 收尾 check 回流给 Hermes
+### 记忆共享写入规范（2026-08-20 用户拍板：记忆共享，必要时注明来源即可）
+
+- **Hindsight 记忆库 = Hermes × DSH 共享写入**：DSH 会话可直接 retain（不再要求经 Hermes 中转），写入时**注明来源**
+- **什么时候写**：任务收尾的结论性内容（决策/事实/教训——同 Hermes retain 标准：跨会话要复用、值得长期记住）；过程噪音不写，拿不准宁可不写（记忆克制）
+- **来源标注**（审计追溯 + 冲突时定优先级）：
+  - tags 固定带：`source: dsh`、`session: <sid>`（或 `route: <任务线>`）
+  - 重要/可能推翻旧结论的条目，content 里写明「来源：DSH 会话 <sid>（任务线 <route>）」——可附「本条目推翻旧记忆…」声明，recall 以新条目为优先
+- **格式**：`POST http://localhost:9177/v1/default/banks/hermes/memories`，body `{"items": [{"content": "...", "tags": ["DSH", "source: dsh", "session: <sid>"]}]}`；**超时给足 120s+**
+- **审计可查**：`~/.hindsight/profiles/hermes.log` 有 retain 记录；记忆审计 cron（`2ad7b042825d`）会扫；来源标注让「唯一出口」演化为「来源可追溯」
+- **Hermes 的角色**：不再强制中转，但保留补充整理权（DSH 写漏/写偏时 Hermes 可补写或修正）
+
+**其余写类渠道仍归 Hermes（DSH 不碰，审计边界 + git 唯一写者纪律）**：
+- 飞书发送、cron 新增/修改、Obsidian 写入、git —— 全部由 Hermes 执行；DSH 需要这些动作时经 BRIDGE_RESULT / NEED_INPUT / 收尾 check 回流给 Hermes
 
 ## Skill 共享与写权限纪律（两边的 skills 是共用的）
 
@@ -409,6 +422,22 @@ registry 文件：`.hermes/dsh-registry.json`（`list` 可查投递/复用统计
     另外**`run_task` 不返回值**——所有信息走 stdout 末尾的 `BRIDGE_RESULT {json}` 行。测试用 `contextlib.redirect_stdout(buf)` + 解析 BRIDGE_RESULT JSON。
 
     **验收标准**：测试套件必须 7/7 全过 + 把代码回退到修复前测试必须红（S7 反证）。跑法：`python scripts/test_dsh_bridge_p0_e2e.py`（退出码 0 = 全过）。详细实现见 `references/turn-end-reason-and-stdout-truncation.md` "端到端测试的关键技巧" 节。
+
+21. **反向通道 v3 路由全表退化——根因是注册表 121 条 session 全无 source/owner（2026-08-20 实测）**。v3 协议层完整支持来源路由（`dsh_bridge.py --source <desktop|feishu|cron> --owner <open_id>` 写入 registry），但所有调用方都没在 `run` 命令里追加这两个 flag，导致：
+   - `.hermes/dsh-registry.json` 121 条 session **全表无 `source` 也无 `owner`**
+   - `dsh_mux_listener.py:174-215` 的精确分支（feishu+owner 推成员本人 / feishu 推妖玉 DM / desktop 留痕）**全部不命中**
+   - 全部走兜底分支「无 source → cwd 判定桌面/飞书」→ 用户看到提问堆在妖玉 DM，路由机制实际空转
+
+   **教训**：
+   - **协议层 ≠ 链路通**：参数解析 + 写入逻辑都正确，但调用方没传 = 整条链路退化成兜底
+   - **全表诊断比单条诊断更准**：只看「hermes-7956064e 没在注册表里」会以为是单条遗漏，看到 121/121 全表无 source 才知道是「所有调用方都没传」的全局问题
+   - **兜底分支要带告警**：当前兜底只 `log()` 不告警，121 条全走兜底都没人发现。修复时给兜底分支加「高频兜底=异常」飞书群通知（不是每个 session 推一次，是统计阈值触发，比如 5 分钟内兜底占比 > 80%）
+
+   **修复路径**（A vs B，待用户拍板）：
+   - A. 监听器兜底更聪明——只看代码层，但当前 cwd=Documents/Hermes 走桌面分支只留痕不推送 = 用户从飞书看到堆消息就是兜底失效证据，先查 `.hermes/dsh-mux-listener.log` 看实际走的是哪条
+   - B. 所有渠道入口带 source/owner——桌面 `--source desktop`、飞书 channel hub `--source feishu --owner <open_id>`、cron `--source cron`、DSH web UI 直发起需产品决策（`source=web`？）
+
+   详细诊断证据 + 实操清单（看 listener 日志 / 全表统计 / 回填验证）+ A vs B 对比表见 `references/dsh-reverse-channel-source-missing.md`。
 
 ## 反向通道（DSH 提问 → 回到发起人所在渠道，「哪来的会哪去」）
 
