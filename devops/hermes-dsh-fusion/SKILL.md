@@ -490,6 +490,29 @@ registry 文件：`.hermes/dsh-registry.json`（`list` 可查投递/复用统计
 
    **关联**：坑 21（监听器砍 cwd 兜底）/ 坑 22（zombie 进程）/ SKILL.md 「桥 CLI」章节（`run_task` 签名）。
 
+## 反向桥（DSH → Hermes 任务委派，2026-08-21 启用，推翻「不建反向桥」裁定）
+
+**机制**：`scripts/hermes_api.py` 封装 Hermes gateway 的 OpenAI 兼容 api_server（127.0.0.1:8642，`gateway/platforms/api_server.py`）。key 从 `$LOCALAPPDATA/hermes/.env` 的 `API_SERVER_KEY` 读取。DSH 会话内用 pwsh 调：
+
+```powershell
+python scripts/hermes_api.py chat "<任务>" [--session <Hermes会话id>] [--timeout 秒]
+python scripts/hermes_api.py sessions [--limit N]        # 会话共享：列 Hermes 会话
+python scripts/hermes_api.py messages <session_id> [--limit N]  # 会话共享：读 Hermes 会话历史（含 reasoning）
+```
+
+**上下文共享**：`chat --session <id>` 带 `X-Hermes-Session-Id` 头续 Hermes 会话上下文（首次调用响应返回 session id，形如 `api-xxxxxxxx`）。续会话走缓存，省 ~34K prompt tokens/轮。
+
+**结果契约**：输出末尾固定 `HERMES_RESULT {json}`（status: done/error；session；reused；token 用量）。
+
+**走反向桥的判据**（DSH 会话里把活交给 Hermes 干）：
+- 写类渠道动作（飞书发送 / cron 增改 / Obsidian 写入 / git）——**由 Hermes 执行，审计单出口纪律保持**，DSH 只投任务文本
+- Hermes 专属能力（记忆 recall、kanban、Hermes 侧上下文延续）
+- 需要 Hermes 会话历史/上下文的协作任务（会话共享 + 上下文共享）
+
+**实测**（2026-08-21）：chat 中文正常（脚本 UTF-8 显式编码；PowerShell `Invoke-RestMethod` 直发中文会乱码，勿绕开脚本）、续会话记住上轮任务、sessions/messages 返回完整结构。
+
+**安全边界**：api_server 有 Bearer 鉴权（401 无 key）；仅 loopback 8642；DSH 投递的任务文本进 Hermes 会话前无额外过滤——投递内容视为可信（本机体系内）。
+
 ## 反向通道（DSH 提问 → 回到发起人所在渠道，「哪来的会哪去」）
 
 **v3（2026-08-20 终态）：事件驱动 + 来源路由 + 原生回答通道**
