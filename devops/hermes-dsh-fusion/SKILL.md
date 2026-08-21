@@ -44,7 +44,9 @@ metadata:
 
 原则：**cwd = 任务产出应该落的地方**。DSH 只能写 cwd 及以下（沙箱写权限），所以把 cwd 指到任务目录 = 天然的范围声明，也保会话按项目隔离。**系统资产目录（skills/hermes-agent 安装目录）只作只读来源，绝不作 cwd 锚**。
 
-## 桥（唯一的交接点，用户无感）
+## 双向桥（Hermes ↔ DSH 对等互联，两个通道）
+
+**双向桥 = 两个对等通道，无主次**：`dsh_bridge.py`（Hermes → DSH，下节）+ `hermes_api.py`（DSH → Hermes，见「hermes_api.py 通道」节）。本节描述 dsh_bridge.py：
 
 `scripts/dsh_bridge.py`——封装 DSH web /api 网关（127.0.0.1:8080，已实测）。**会话复用键 = cwd + 活跃线程**（默认续用、--new 显式断、close 显式收尾）；label 只是可读标签，不参与匹配：
 
@@ -242,7 +244,7 @@ registry 文件：`.hermes/dsh-registry.json`（`list` 可查投递/复用统计
 
 ## 资源访问边界（读类直连 / 记忆共享写入 / 其余写类经 Hermes）
 
-「用 Hermes 的 X」≠「调用 Hermes agent」——cron/飞书/skill/Obsidian/Hindsight 是 Hermes 背后的**资源**。DSH 直连读类（知情自取）；**Hindsight 写入 2026-08-20 起共享（DSH 可直连 retain，注明来源即可）**；其余写类仍归 Hermes（单出口审计纪律，2026-08-17 已裁定「不建反向桥」）：
+「用 Hermes 的 X」≠「调用 Hermes agent」——cron/飞书/skill/Obsidian/Hindsight 是 Hermes 背后的**资源**。DSH 直连读类（知情自取）；**Hindsight 写入 2026-08-20 起共享（DSH 可直连 retain，注明来源即可）**；其余写类仍归 Hermes（单出口审计纪律；2026-08-17 曾裁定「不建反向桥」，**2026-08-21 已推翻**——双向桥启用，写类单出口仍保持，见「hermes_api.py 通道」节）：
 
 **DSH 读类直连（不走 Hermes，省一次往返）**：
 - Hindsight 记忆召回：`python scripts/dsh_bridge.py util hindsight recall "<query>" [--limit N]`
@@ -490,7 +492,7 @@ registry 文件：`.hermes/dsh-registry.json`（`list` 可查投递/复用统计
 
    **关联**：坑 21（监听器砍 cwd 兜底）/ 坑 22（zombie 进程）/ SKILL.md 「桥 CLI」章节（`run_task` 签名）。
 
-## 反向桥（DSH → Hermes 任务委派，2026-08-21 启用，推翻「不建反向桥」裁定）
+## hermes_api.py 通道（DSH → Hermes，2026-08-21 启用）
 
 **机制**：`scripts/hermes_api.py` 封装 Hermes gateway 的 OpenAI 兼容 api_server（127.0.0.1:8642，`gateway/platforms/api_server.py`）。key 从 `$LOCALAPPDATA/hermes/.env` 的 `API_SERVER_KEY` 读取。DSH 会话内用 pwsh 调：
 
@@ -504,7 +506,7 @@ python scripts/hermes_api.py messages <session_id> [--limit N]  # 会话共享�
 
 **结果契约**：输出末尾固定 `HERMES_RESULT {json}`（status: done/error；session；reused；token 用量）。
 
-**走反向桥的判据**（DSH 会话里把活交给 Hermes 干）：
+**DSH 会话把活交给 Hermes 的判据**：
 - 写类渠道动作（飞书发送 / cron 增改 / Obsidian 写入 / git）——**由 Hermes 执行，审计单出口纪律保持**，DSH 只投任务文本
 - Hermes 专属能力（记忆 recall、kanban、Hermes 侧上下文延续）
 - 需要 Hermes 会话历史/上下文的协作任务（会话共享 + 上下文共享）
