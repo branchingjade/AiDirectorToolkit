@@ -552,6 +552,12 @@ done
 
 **根因修复（防复发）**：清理收尾时把全部正式工具 `git add` 纳入追踪——之后「git 追踪状态」就是唯一可靠的保留判据，不再依赖手写白名单。误删后的恢复方法（本地备份 tar 提取）见 hermes-backup skill「从本地备份 tar 恢复误删文件」。
 
+### hermes update 三大坑（2026-08-20 实测，完整流程见 references/hermes-update-runbook.md）
+
+1. **补丁正本漂移**：正本（Obsidian 补丁管理/hermes-local-patches.diff）必须与实际工作区一致，否则 update 重打会把已废弃改动（如已解耦的 DSH 桥）加回。更新前 `git apply --check --reverse` 验证，不一致先同步正本。
+2. **autostash 恢复不完整**：大更新（370 commits）后 autostash 只恢复 15/24 个补丁文件，9 个被上游覆盖丢失。**不能信 update 输出的 "Local changes were restored"**——必须 `git apply --check --reverse` 逐文件验证，丢失的用正本 `--include` 白名单重打。
+3. **误删桌面 app 编译产物**：`apps.hermes-update-old/` 含 `release/win-unpacked/Hermes.exe`（编译产物，不被 git 跟踪、不进回收站）。**清理 update 残留时 `apps*`/`release*` 备份一律不删**——删了桌面 app 整个消失（"找不到 hermes"），只能 `hermes desktop --build-only` 重建（5-10 分钟）+ 修正快捷方式。
+
 ### git mv 只对 tracked 文件有效
 
 整理目录时，untracked 文件（未 add 过）用 `git mv` 会 fatal "not under version control"——先普通 `mv` 移动，再 `git add` 新位置；tracked 文件才用 `git mv` 保留 rename 记录。另外 `git mv` 目标路径已存在也会 fatal——先 `diff` 对比两份内容再决定删哪个（反面案例：根目录 cats.txt 是缩进混乱+重复行的脏版，IronNorthScene 已有干净版，删脏版留干净版）。
@@ -675,5 +681,6 @@ User Profile 是**徐学环本人的画像**，不是所有偏好的收纳箱。
 | `references/knowledge-base-agent-usage.md` | **知识库 → agent 可用验证方法论** — 三层落地（土壤 skill 速查/流程 skill 阶段 0 钩子/同级 skill 显式路由）的**验证三法**：skills_list 索引可见性、delegate_task 子代理读 live transcript 看 skill_view 调用链（子代理自报不可信）、usage.json last_used_at 长期监控；同类 skill 干扰判据=同层多副本才是重复（2026-08-10 前端设计知识库实测，11 次 skill_view 链路 + impeccable 11 个缺失 reference 发现） |
 | `references/transient-window-debugging.md` | **一闪而过窗口排查方法论** — 弹窗源清单（计划任务 python.exe / pythonw AllocConsole / 守卫 MARKER 路径漂移 / ops-update-runner / 系统 hpatchmonTask）+ 排查命令链（计划任务枚举/进程树/事件日志断路/EnumWindows 抓现行）+ bash+PowerShell 转义地狱解法（2026-08-09 实测） |
 | `references/ops-panel-update-runner.md` | **ops-panel 更新执行器停机陷阱** — 触发即停全部服务、app 不退出则超时 failed 且不恢复（gateway 保持停机）；dryrun 也停服务；恢复流程 Start-ScheduledTask Hermes_Gateway + 8644 验证（2026-08-09 实测） |
+| `references/hermes-update-runbook.md` | **hermes update 完整 runbook** — 更新前补丁正本一致性验证/进程占用清理；更新后 autostash 只恢复部分补丁的验证与重打（2026-08-20 实测 15/24）；**误删 apps.hermes-update-old 致桌面 app 消失**的教训与 hermes desktop --build-only 重建；残留清理安全规则（2026-08-20 实测） |
 | `scripts/window-flash-capture.py` | **弹窗抓现行高频监控** — 0.05s 轮询 EnumWindows，记录 ConsoleWindowClass/python/cmd 窗口 NEW/TITLE-CHANGE/GONE（PID/标题/存活时长），配合 transient-window-debugging.md 排查链；用法 `<python> window-flash-capture.py [日志] [秒数]`（2026-08-09 实证） |
 | `scripts/cleanup-projects.py` | 项目清理脚本 |
