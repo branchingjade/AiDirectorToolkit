@@ -122,3 +122,4 @@ update 会在 hermes-agent 根目录生成：
 | update 后行为异常 | autostash 只恢复部分补丁 | `git apply --check --reverse` 验证，丢失的用正本重打 |
 | 桌面 app 消失（找不到 hermes） | 误删 `apps.hermes-update-old` | `hermes desktop --build-only` 重建 |
 | 补丁重打后 DSH 桥/废弃代码出现 | 正本含已解耦补丁 | 更新前先同步正本 |
+| update 报 `✗ Other Hermes processes are running ... ← gateway`（venv 依赖安装被拦，但代码更新已成功） | 用户**自己活跃的 gateway 会话**占着 venv（同用户、`Stop-Process`/`taskkill` 均 Access denied；就算 `Stop-ScheduledTask` 停了任务，update 又会冷启动新网关形成叠影，`--force` 也过不去） | **代码更新 + 补丁恢复不受影响**，新代码上网关 `/health=200` 正常 → 可视为已更新；如需补跑 venv 依赖安装，先关 Hermes 桌面/终端（或无活跃网关时）再 `hermes update`，或 `hermes update --force-venv` 硬闯（自担部分安装风险） |
