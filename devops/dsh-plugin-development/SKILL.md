@@ -327,6 +327,21 @@ README 只给经过全新 profile 验证的推荐命令。安装后重启目标 
 - 普通 build 后没有 watcher 时，刷新现有 DSH 页面。
 - 不启动独立 Vite server 替代 DSH GUI；Web shell 依赖 host 注入的 `window.__DSH_BOOT__`。
 
+### 7.3 实跑踩坑：BOM 与 core 包位置（2026-08-25 实测）
+
+接入运行中 DSH 的独立插件（如 dsh-memo-inject）时踩到两个硬坑：
+
+**1. UTF-8 BOM 会让 DSH 解析失败**
+`Set-Content -Encoding utf8`（旧版 PowerShell）会给 JSON/YAML 加 **UTF-8 BOM**（`EF BB BF`）。DSH 的 `readProfileManifest` 用 `JSON.parse` 读 profile `package.json`，YAML loader 同理——**不容忍 BOM**，报 `SyntaxError: Unexpected token '﻿'`（`packages/boot/app-boot/src/profile.ts`）。症状：改完 profile/插件后 `dsh --dump-config` 直接失败，DSH 起不来。
+
+规避：写 JSON/YAML 到 profile 或插件包时**禁用 `Set-Content -Encoding utf8`**，用 `[System.IO.File]::WriteAllText($path, $content, [System.Text.UTF8Encoding]::new($false))`，或在写完后核对前 3 字节是否为 `123 13 10`（`{`+CRLF）而非 `239 187 191`。
+
+**2. DSH core 包在 pnpm hoist 的位置**
+`@deepseek-ai/*` 核心包（dsh-agent/dsh-llm/dsh-tools 等）**不在** `~/.dsh/profiles/web/node_modules/@deepseek-ai/`（那里只有 cosmokit/schemastery），而被 pnpm **hoist 到 `~/.dsh/profiles/node_modules/@deepseek-ai/`**，经 junction 链到 `deepseek-harness` checkout。查依赖/验证插件加载时用 `resolveDshHome()`（= `~/.dsh`）定位，直接从 `~/.dsh/profiles/node_modules` 解析核心包（实测 `require('@deepseek-ai/dsh-llm').createUserMessage` 为 function）。
+
+**3. 注入类插件用核心包时标 external**
+依赖 `@deepseek-ai/dsh-agent` / `dsh-llm` 的插件，esbuild 打包时把 core 包标 **external**（运行时解析），只内联自己的访问层；`dsh-agent` 可仅类型导入（`Agent`/`PreStepDecision`，运行时擦除）→ 产物小而稳。参照 `time-context` 的 `agent/pre-step` 注入模式（`createUserMessage` + `source:{kind:'plugin',...}`）。
+
 ## 8. 验证矩阵
 
 ### 8.1 基线
