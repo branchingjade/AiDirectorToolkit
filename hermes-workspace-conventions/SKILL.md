@@ -142,6 +142,29 @@ scope = 影响范围（日志|图谱|知识库|规范|自检|飞书|犬子无双
 
 **多文件变更时加 body：** `-` 列表简述每项
 
+### 术语表达铁律：落点优先于机制（2026-08-25 用户现场纠正）
+
+**说事实/落点，不说机制/技术术语。** 用户关心「这个东西在哪、是啥」，不关心「背后是哪个进程/插件/模式在跑」。
+
+反面案例（2026-08-25）：
+- 用户问"Hindsight 本地嵌入？是 MEMORY.md"——我回答时夹杂"Hindsight 嵌入模式"、"local_embedded"等技术词
+- 用户被术语搞迷糊，反驳"不是，本地的单独的"
+- 同一会话后续 Hindsight 自己 retain 了这条铁律进 MEMORY.md（编号73）："避免混用技术术语让用户迷糊——优先用落点/事实表达（'MEMORY.md'），少用机制层术语（'Hindsight 嵌入模式'）"
+
+**正确表达对照：**
+
+| ❌ 机制层术语（让人迷糊） | ✅ 落点/事实表达（秒懂） |
+|---|---|
+| Hindsight local_embedded 模式 | MEMORY.md 文件 |
+| Hindsight daemon 在 9177 端口跑 | 记忆那条线 |
+| hindsight_daemon_guard.py 保活 | 计划任务每5分钟自愈 |
+| memos provider 写入 NAS MemOS | NAS 那边有数据 |
+| cordis-plugin-include 加载 | DSH 那边的插件 |
+
+**判定**：用户能直接打开某个文件/看到某个界面 = 落点；只能间接验证/看不到实体的 = 机制。说前者。
+
+**例外**：用户主动问机制时（如"DSH 是怎么写的"），可以展开讲机制层；平时报告/排查/操作，默认走落点表达。
+
 ## 任务后收尾（完成 ≠ 结束）
 
 每次建 todo 列表，最后一项固定为「收尾检查：Obsidian/Git/Skill」。任何阶段成果完成后，**必须输出以下清单并逐项处理**：```
@@ -300,6 +323,25 @@ scope = 影响范围（日志|图谱|知识库|规范|自检|飞书|犬子无双
 
 **子代理/cron 自报不可信**：cron 自动验证报告「打通成功」是自报，必须独立复验（直接调数据层 API，不依赖子代理转述）。验证链从硬到软：数据层入库（memories/list 关键词命中）→ 全量 recall（加大 limit 看排序）→ 才下结论。默认工具 recall 的截断结果不算数。
 
+### NAS MemOS API 字段名/端点陷阱（2026-08-25 实测）
+
+**症状**：直接 curl MemOS 后端 `http://hmsj.local:8001`（或 IP `:8001`），用 `/product/get_all` + `cube_id` 字段拉数据，**返回 0 条**——断言"NAS 是空的"被打脸。
+
+**根因**（实测教训）：
+- 字段名是 `mem_cube_id`（不是 `cube_id`）
+- 端点是 `/product/get_memory_dashboard`（不是 `/product/get_all`；`get_all` 要带 `memory_type: 'text_mem'` 且仍可能命中其它 cube）
+- 用户看到的 UI 走的字段/端点和直接 curl 不一致——必须先 grep 前端源码确认实际调用
+
+**正确排查顺序**（避免重蹈 2026-08-25 那次脸疼）：
+1. **先看用户给的截图/前端页面**——记下数据源标识（cube 名/统计数）
+2. **grep 前端调用源码**确认实际字段名和端点路径（memos-console-web 用 `mem_cube_id` + `get_memory_dashboard`）
+3. **用真实字段/端点 curl** 拿数据
+4. **不要凭"我没搜到"下断言"空"**——可能是参数错，不是数据空
+
+**反向教训**：用户贴截图说"里面有非常多记忆的"时，先认错（自己搜错了），再去用对的方法重试——不要坚持"我搜不到所以空的"。
+
+**配套铁律**：和"用户不关心你调了什么工具"叠加——直接展示"用对方法重试后的结果"，不要先长篇解释"为什么之前错的"。
+
 ### 行为规则不触发陷阱
 
 Memory 处于系统提示「背景知识」层，agent 任务中注意力在 skill 上，不会主动扫描 memory 找 checklist。**行为指令放 skill，决策知识放 memory。** 已执行：行为铁律从 memory 搬到本 skill，memory 从 19 条精简到 7 条。
@@ -453,6 +495,29 @@ tail -5 ~/AppData/Local/hermes/logs/gateway.log              # 无报错
 ```
 
 功能级验证钩子改动：直接 import 模块调用函数（`venv/Scripts/python.exe -c` 里 import collab 后调 `record_project_memory`，确认返回 False 且不写文件），比只看日志更硬。**实测验证法**（2026-08-08）：用 `tempfile.TemporaryDirectory()` 打补丁 `collab.PROJECT_MEMO_DIR` 指向临时目录后调用，断言返回 False 且临时目录零文件——不依赖真实 vault 状态，可重复。
+
+### Hindsight 停用流程坑（2026-08-25 实测）
+
+**改 config ≠ 立即停**：Hindsight daemon 在 9177 端口独立守护，**进程内读配置一次**——改 `hindsight/config.json` 后，**已运行的 daemon 实例不会热重载**，要等下一次进程启动（`hindsight_daemon_guard.py` 拉起时读新配置，或下次会话 retain 时）。
+
+实测时间线（2026-08-25）：
+- 09:08:17 改 `auto_retain=false` + `auto_recall=false`
+- 09:08:18 重启 gateway
+- **09:13:01 `hindsight_daemon_guard.py` 拉起 daemon（仍跑旧配置），写入最后 3 条铁律进 MEMORY.md**
+- 09:18:00 下一次 daemon 拉起才用新配置
+
+**正确停用流程：**
+1. 备份 `hindsight/config.json`（带时间戳）
+2. 改 `auto_retain=false` + `auto_recall=false` + `retain_every_n_turns=0` + `recall_types=""`
+3. **立刻重启 gateway**（杀掉 hermes_cli gateway run 进程后用 `Hermes_Gateway.cmd` 拉起）
+4. **等下个 5 分钟周期 daemon 自动拉起**（或手动触发 `hindsight_daemon_guard.py --force`）
+5. 验证 MEMORY.md mtime 不再变动（最直接的"真的停了"信号）
+
+**重启 gateway 实测陷阱**：
+- `Stop-Process -Force` 杀两个 gateway 进程（50368 + 30480）后，**`gateway_watchdog.py --force` 报"健康无需动作"是误判**——它主判据是 netstat LISTENING 8644，但 watchdog 进程的 netstat 子进程在某环境看到的状态与实际 terminal 不同步
+- 解法：直接 `Hermes_Gateway.cmd` 后台跑（terminal `background=true`），8 秒内8644 重新 LISTENING
+
+**MEMORY.md 是落点不是机制**（呼应「术语表达铁律」）：Hindsight = 机制，MEMORY.md = 落点。停用 Hindsight 时跟用户说"停用了，记得/铁律都在 MEMORY.md 里"，不要说"停用了 Hindsight local_embedded"。
 
 ### 并行会话同写 skill/memory 文件（2026-08-07 实测）
 
