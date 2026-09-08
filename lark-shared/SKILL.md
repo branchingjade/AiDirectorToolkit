@@ -56,7 +56,30 @@ LARKSUITE_CLI_NO_UPDATE_NOTIFIER=1 LARKSUITE_CLI_NO_SKILLS_NOTIFIER=1 lark-cli a
 | user 用户身份 | `--as user` | `lark-cli auth login` 等 | 访问用户自己的资源（日历、云空间/云盘/云存储等） |
 | bot 应用身份 | `--as bot` | 自动，只需 appId + appSecret | 应用级操作,访问bot自己的资源 |
 
-> **v1.0.82 语法变化**：`auth status` / `auth login` / `auth logout` 子命令**不再接受 `--as` flag**（报 `unknown flag "--as"`）。身份切换改用 `lark-cli whoami --as user|bot`（whoami 接受 `--as`）。业务命令（`im +messages-send`、`calendar +agenda`、`drive +search` 等）的 `--as` 位置不受影响——放在子命令后，如 `lark-cli --as user calendar +agenda`。
+- **v1.0.82 语法变化**：`auth status` / `auth login` / `auth logout` 子命令**不再接受 `--as` flag**（报 `unknown flag "--as"`）。身份切换改用 `lark-cli whoami --as user|bot`（whoami 接受 `--as`）。业务命令（`im +messages-send`、`calendar +agenda`、`drive +search` 等）的 `--as` 位置不受影响——放在子命令后，如 `lark-cli --as user calendar +agenda`。
+
+### 跨身份文档枚举前的预检铁律（2026-09-08 实战）
+
+**症状**：用户问"列出伏妖记项目所有文档"，agent 直接 `drive files list --folder-token <root>`，bot 拿到根目录但 shortcut 项不显示，user 身份报 `space:document:retrieve` 缺 scope，`+search` 又报 `search:docs:read` 缺 scope——**三轮失败才意识到每个身份 × 每个命令的 scope 是错开的**。
+
+**根因**：bot / user 两个身份对 Drive 命令的权限不是镜像的。常见错位：
+
+| 命令 | bot 缺什么会失败 | user 缺什么会失败 |
+|---|---|---|
+| `drive +search` | `search:docs:read`（bot 必须后台申请该 scope） | 通常可用，但 owner/mine 维度可能受 user 自己权限限制 |
+| `drive files list`（任何 folder） | 通常可用但根目录**不返回 shortcut** | `space:document:retrieve` |
+| `drive files list --option shortcut` | API 直接报 `1061002 params error`（option 取值不识别） | 同 |
+| `docs +fetch --doc <token>` | 通常可用 | 通常可用 |
+
+**预检三件套**（任何"列出项目所有文档"任务**第一轮必做**）：
+
+1. `lark-cli whoami --as bot && lark-cli whoami --as user` → 确认两个身份都已登录且是同一个飞书账号
+2. 假设 bot 跑不通就走 user；假设 user 跑不通就走 bot——**不要反复在两边都试**，根据第一步确定的方向直接走，节省 2-3 轮
+3. 枚举命令优先级：`drive +search --query <项目名>` > `drive files list` 递归 > `drive +inspect --url <分享链接>` 单点反查。`+search` 能命中跨 folder 的 shortcut/分享文档；`files list` 只走 folder 树根目录不展开 shortcut。**任务目标是"完整项目文档盘点"时优先 `+search`，不要先试 `files list`**
+
+**反面案例（2026-09-08 伏妖记项目）**：bot 列根目录 folder=`nodcnhTHWMNkwyj2RhEd0liu20e` 拿到 19 个文件但**只有 1 个命中"伏妖"**；user 列表报 `space:document:retrieve`；bot `+search` 报 `search:docs:read`——三轮盲试后才意识到要回过去读已有 `lark-drive-search.md` 看清"该命令需要哪个 scope 在哪个身份下"。**根因**：没在第一轮做上面三件套预检。
+
+**写作形态**：该教训属于"程序性工作流+预检命令模板"，归本 skill 的"权限不足处理"节而非独立 SKILL。已在 `lark-shared/SKILL.md` 落地。
 
 ### 身份选择原则
 
