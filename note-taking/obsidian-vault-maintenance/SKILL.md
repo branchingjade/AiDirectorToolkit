@@ -175,6 +175,72 @@ related:
 
 **⚠️ 改完必须重启 Obsidian**：运行时缓存旧索引，图谱不实时反映新 wikilink（实测：文件改了、链接加了，图谱还是旧的，重启后才显示）。
 
+## 项目级 vault 进入"只读归档"状态（2026-09-03 实战确立）
+
+当 OV 上线作为某项目的总览入口后，用户可能拍板"Obsidian 写入退役"——即该项目的 vault 子目录转入"只读归档"状态。这是 vault 状态机的重大变化，必须**逐步走完流程**：
+
+### 触发
+
+- 用户原话含"Obsidian 退役 / 退役 Obsidian / Obsidian 只读 / OV 主写 / 砍掉 Obsidian 写入"
+- **前提**：OV 已具备该项目总览入口（`viking://resources/projects/<项目>/`）
+
+### 流程（顺序不可错）
+
+1. **确认范围（先问再做）**：用户拍板"X 项目退役"时，**必须先确认**是单一项目（如伏妖记）还是所有项目。一刀切可能误伤其他项目的 Obsidian 双写流程。
+2. **标记只读归档**：在 Obsidian 项目目录新建 `_归档说明.md`，顶部声明：
+   ```markdown
+   ---
+   tags: [<项目>, 归档说明, 只读归档]
+   date: YYYY-MM-DD
+   ---
+   # X 项目 Obsidian 归档 · 只读说明
+   > ⚠️ 本目录状态：只读归档（<日期> 退役 Obsidian 写入拍板）
+   > 新内容请走 OpenViking：viking://resources/projects/<项目>/
+   > 飞书正本（权威源）：<URL>
+   ```
+3. **更新现有项目笔记**：在 `<项目>/<项目>.md` 等入口文档的 frontmatter 加 `tags: [..., 只读归档]`，正文顶部加归档说明横幅（同上）。不改其他内容。
+4. **git 提交归档状态**：`git -C <vault_repo> add -A && git commit -m "归档(<项目>): 退役Obsidian写入，标记为只读归档，OV主写"`——确保 git 历史可回溯。
+5. **OV 写铁律持久化**：`viking_remember(category=pattern, content="<日期>用户拍板Obsidian写入退役铁律（<项目>项目先行）：从今天起凡涉及<项目>的新内容只走OpenViking（viking://resources/projects/<项目>/），不再向Obsidian <项目>目录写入。Obsidian目录仅作只读归档（历史溯源），不主动更新。...")`——recall 排序首位，下次会话自动看到。
+6. **更新 OV README 顶部**：加"Obsidian 写入已退役"声明 + Obsidian 归档路径链接（指向 `KnowledgeBase/Obsidian Vault/<项目>/`）。
+
+### 状态机的四种形态
+
+| 状态 | 写入 | 读取 | git 提交 |
+|---|---|---|---|
+| 活跃（默认）| ✅ | ✅ | ✅ |
+| 只读归档 | ❌ | ✅ | ✅（仅 git 历史溯源） |
+| 已废弃 | ❌ | ⚠️（手动启用）| ❌ |
+| 永久归档 | ❌ | ❌ | ❌（git tag 留存） |
+
+### 与现有工具链的关系
+
+- **Obsidian 自检脚本**（`weekly-check.py`、`orphan-scan.py`）：只读归档目录仍在 vault 内，**继续跑**（不跳过）——悬空 wikilink / 孤岛检测照常
+- **git 归档 cron**（每日 `git add -A && commit && push`）：只读归档目录**有 git 历史**，继续被 commit——但新增 .md 不会被创建（因为不再写入）
+- **图谱**：只读归档目录在图谱中保留（不删节点），但不再有新增节点
+- **MOC**：不在 vault MOC 中删除只读归档项目，仍作为历史溯源入口
+
+### 撤销边界（用户改主意时）
+
+用户改主意恢复 Obsidian 写入时：
+1. 改 Obsidian `_归档说明.md` 顶部状态（只读→活跃）
+2. 移除入口文档的 `只读归档` tag
+3. git commit 标记状态变更
+4. 更新 OV README 顶部声明
+5. 更新 OV pattern 记忆（"恢复 Obsidian 写入"）
+
+### 陷阱
+
+- ❌ **一刀切所有项目**：必须先确认范围
+- ❌ **删 Obsidian 内容**：只标记状态，不删内容（保留 git 历史）
+- ❌ **未 git 提交就标记**：标记前必须 commit
+- ❌ **OV README 没标权威**：如果 README 没写"以 OV 为项目总览入口"，agent 下次会话可能误用 Obsidian
+- ❌ **跳过范围确认**：用户拍板"退役 Obsidian"可能是单一项目，不是一刀切
+
+### 关联
+
+- **主流程**：`hermes-runtime-pitfalls/references/project-ov-overview.md` 第八步
+- **背景 skill**：`hermes-workspace-conventions`（飞书/Obsidian/OV 三层分工）
+
 ## Pitfalls
 
 ### read_file 把中文 UTF-8 笔记误判为二进制

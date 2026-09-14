@@ -1,7 +1,7 @@
 ---
 name: inspecting-hermes-desktop-dom
 description: "Read the live Hermes desktop DOM/CSS over CDP."
-version: 1.0.0
+version: 1.1.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -9,6 +9,8 @@ metadata:
   hermes:
     tags: [desktop, electron, cdp, dom, ui-verification, self-inspection]
     related_skills: [node-inspect-debugger, systematic-debugging, dogfood]
+    changelog:
+      - 1.1.0 (2026-08-20): Added pitfall "The screenshot is the data, not the source" — when the user hands you a rendered screenshot, route through live DOM (this skill) before source; cross-linked to `diagnosing-bugs`.
 ---
 
 # Inspecting the live Hermes desktop DOM
@@ -157,3 +159,12 @@ also want the perf harness.
   (`.result.result.value`). Use the wrapper.
 - **`import.meta.env.DEV` is `true` under `vite dev`** in this repo. The note in
   `apps/desktop/scripts/profile-typing-lag.md` claiming otherwise is stale.
+- **The screenshot is the data, not the source.** When the user hands you a
+  screenshot of a rendered problem, the inference chain is
+  screenshot → live DOM (here) → source. Skipping the middle step (going
+  screenshot → `.tsx`) is how you end up "fixing" code that may not actually be
+  involved. A 10-second CDP probe — `querySelector` for the suspect component,
+  read its computed styles, check whether the expected children are even present
+  in the DOM — saves hours of source-reading that points at the wrong layer.
+  See `diagnosing-bugs` §"Pitfall: anchoring on the most satisfying commit hash"
+  for the worked example.

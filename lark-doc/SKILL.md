@@ -36,7 +36,7 @@ lark-cli docs +update --doc "文档URL或token" --command append --content '<p>�
 - 用户有本地 `.md`（Obsidian 笔记/大纲/剧本）要转成结构化飞书文档 + 富功能优化（callout/时间轴）时，读 [`lark-doc-from-markdown.md`](references/lark-doc-from-markdown.md)，用 `scripts/md2xml.py` 转换后创建
 - 用户要**复制文档 / 创建文档副本 / 另存为副本**时，切到 [`lark-drive`](../lark-drive/SKILL.md)，按其中的复制指引使用 `lark-cli drive files copy`；不要用 `docs +fetch` + `docs +create` 重建正文，也不要走 `drive +export` / `drive +import`。
 - 先判定任务路径：找文档 / 导入导出走 [`lark-drive`](../lark-drive/SKILL.md)；只读 / 摘要用 `docs +fetch` 默认 `simple`；明确旧文本 → 新文本直接 `str_replace`；只有 block 链接、评论锚点、插入 / 替换 / 删除 / 移动才局部 fetch `with-ids`；保真改写已有内容才读 `full`
-- **⚠️ str_replace 铁律（详见 `lark-doc-update.md` 三大坑）**：① `--content ""` 删除 = 删**全部**匹配（重复文本会全删）——删除前先数出现次数；② 返回 `ok:true` ≠ 生效，替换后必须 fetch 验证；③ pattern 必须从 fetch 原文复制（字面匹配，差一个字就静默失败）。改动可能重复/含块级标签时，改用 `block_replace --block-id`
+- **⚠️ str_replace 铁律（详见 `lark-doc-update.md` 三大坑 + 降级工作流）**：① `--content ""` 删除 = 删**全部**匹配（重复文本会全删）——删除前先数出现次数；② 返回 `ok:true` ≠ 生效，替换后必须 fetch 验证；③ pattern 必须从 fetch 原文复制（字面匹配，差一个字就静默失败）。**str_replace 静默失败时立刻降级到 `block_replace --block-id`**（取 with-ids 拉 block_id 后整段覆盖，不依赖 pattern 字面匹配），不要反复调 pattern；④ **update 命令必须显式带 `--as user`**——lark-cli 默认 `defaultAs=bot`，用户创建的文档 bot 无编辑权，会 4030004。改动可能重复/含块级标签时优先 `block_replace --block-id`
 - block 直达链接格式：`文档基础 URL#block_id`；没有 block_id 时局部 fetch `with-ids`
 - 连续执行多个文档写操作时，必须按 [`lark-doc-update.md`](references/lark-doc-update.md) 的「Block ID 生命周期」判断旧 block ID 是否还能复用；`overwrite` / `block_replace` / `block_delete` 后不要复用受影响的旧 ID，插入 / 复制后要重新 fetch 才能拿到新 block ID
 - 用户需要在文档内**创建、复制或移动**资源块（画板、电子表格、多维表格等）时，必须先读取 [`lark-doc-xml.md`](references/lark-doc-xml.md) 的「三、资源块」章节
@@ -73,7 +73,7 @@ Shortcut 是对常用操作的高级封装（`lark-cli docs +<verb> [flags]`）�
 | [`+fetch`](references/lark-doc-fetch.md) | Fetch Lark document content (XML / Markdown / im-markdown; `im-markdown` only after fetch for `lark-im`) |
 | [`+update`](references/lark-doc-update.md) | Update a Lark document (str_replace / block_insert_after / block_replace / ...) |
 | [`+history-list` / `+history-revert` / `+history-revert-status`](references/lark-doc-history.md) | List document history, revert to a `history_version_id`, and query revert task status |
-| [`+media-insert`](references/lark-doc-media-insert.md) | Insert a local image or file at the end of a Lark document (4-step orchestration + auto-rollback). Prefer `--from-clipboard` when the image is already on the system clipboard (screenshots, copy from Feishu/browser); use `--file` only for on-disk sources. |
+| [`+media-insert`](references/lark-doc-media-insert.md) | Insert a local image or file into a Lark document (默认末尾插入). Prefer `--from-clipboard` when the image is already on the system clipboard (screenshots, copy from Feishu/browser); use `--file` only for on-disk sources. **⚠️ 不能插入到 table cell 内——若目标在表格中，改用「insert-到-末尾 + block_move_after 移到表格后」兜底模式（详见 reference）** |
 | [`+media-download`](references/lark-doc-media-download.md) | Download document media or whiteboard thumbnail (auto-detects extension) |
 | [`+media-preview`](references/lark-doc-media-preview.md) | Preview document media file (auto-detects extension) |
 | [`+resource-download` / `+resource-update` / `+resource-delete`](references/lark-doc-resource-cover.md) | Download, update, or delete a Docx cover image resource with `--type cover` |

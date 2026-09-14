@@ -13,19 +13,191 @@ metadata:
 
 所有定时报告类 cron job 的统一规范入口。覆盖 LLM 驱动监控、脚本采集推送、格式约定、渠道规则。
 
-## 现有 Cron 任务
+## 现有 Cron 任务（2026-09-08 实测 17 个）
 
-| Job ID | 名称 | 频率 | 类型 | 说明 |
-|--------|------|------|------|------|
-| `491b6b1d28f3` | Hermes 版本简报 | 周一 9:00 | LLM | 本地 vX → GitHub latest，对比差距 + 中文简报 |
-| `e14576c54fcf` | 外部技能同步（统一） | 每天 9:00 | LLM（terminal 调脚本） | 自动发现所有 tap + yaml 配置的源，格式自检测，JSON 输出→LLM 智能判断报告 |
-| `7c3df411d075` | 备份 | 每天 8:00 | LLM（terminal 调脚本） | Hermes+Obsidian → 坚果云 WebDAV |
-| `d89acf50b8a2` | lark-cli OAuth token 检查+自动续期 | 每天 9:00 | LLM（terminal 调脚本+lark-cli） | 过期前自动触发续期（lark-cli whoami），refresh token 已过期时提醒手动授权 |
-| `9cd411f36430` | GitHub 项目日报 | 每天 8:30 | LLM（terminal 调脚本） | GitHub Search API 采集→LLM 筛选分领域简报，脚本做增量标注（is_new/stars_gain） |
-| `33a66b9983b6` | GitHub 项目周报 | 周日 8:30 | LLM（terminal 调脚本） | 同上，weekly 窗口 |
-| `795383fd8a53` | GitHub 项目月报 | 每月1日 8:30 | LLM（terminal 调脚本） | 同上，monthly 窗口 |
+全部由 `cronjob_manage list` 实拉，**清单必须随 cron 增删同步刷新**——不要靠记忆维护。
 
-全部 LLM 驱动（`no_agent=false`，不配 `script` 字段），推送到飞书 DM。无更新也报告。
+| Job ID | 名称 | 频率 | 状态 |
+|--------|------|------|------|
+| `e14576c54fcf` | 外部技能同步 | 每天 8:30 | ✅ ok |
+| `7c3df411d075` | Hermes WebDAV 备份 | 每天 8:30 | ✅ ok |
+| `491b6b1d28f3` | Hermes 版本简报 | 每天 8:30 | ✅ ok |
+| `88ab7ff66681` | 飞书每日摘要-其他人对话 | 每天 8:30 + holiday check | ✅ ok |
+| `d466e0d36bc2` | 知识库每日巡检 | 每天 8:30 | ✅ ok |
+| `3319ff2ddaa6` | 知识库每周大维护 | 周日 8:30 | ✅ ok |
+| `7875566b75f6` | 伏妖记定期审读 | 每天 8:30 + holiday check | ⚠️ 剧本 token 错（见「cron 配置审查范式」） |
+| `4da8374c0b69` | 飞书协作健康检查 | 周日 8:30 | ✅ ok |
+| `9cd411f36430` | GitHub 项目日报 | 每天 8:30 | ✅ ok |
+| `33a66b9983b6` | GitHub 项目周报 | 周日 8:30 | ✅ ok |
+| `795383fd8a53` | GitHub 项目月报 | 每月1日 8:30 | ✅ ok |
+| `2ad7b042825d` | 记忆库画像类审计 | 每天 8:30 | ✅ ok（deliver=local） |
+| `a87c3a295279` | 飞书 OAuth token 自动续期 | 每天 9:00 | ✅ ok（deliver=local） |
+| `347fdcac76df` | 飞书渠道健康度早报 | 每天 8:30 | ✅ ok |
+| `1b140a071247` | feishu-orphan-messages | 每天 8:30 | ✅ ok（deliver=origin） |
+| `ebd87ff73725` | 团队 skills 共享到 OpenViking | 每天 8:30 | ⏸ **paused**（2026-08-31 起，paused_reason=null） |
+| `2a92494153ca` | 月度考勤报表推送 | 每月1日 8:30 | 🆕 scheduled（**last_run_at=null，从未跑过**） |
+
+**汇总**：15 跑 ok + 1 paused + 1 从未跑 + 1 跑 ok 但配置错（推送内容跟意图不符）。
+
+**标准盘点命令**：
+```bash
+# 1. 全表
+cronjob_manage(action='list')
+
+# 2. 单 job 完整 prompt（list 不支持 job_id 过滤，必须读 jobs.json）
+python3 -c "
+import json
+d = json.load(open('C:/Users/HMSJ/AppData/Local/hermes/cron/jobs.json'))
+for j in d.get('jobs', d):
+    if j.get('id') == '<job_id>':
+        print(j['prompt'])  # 完整 prompt，没截断
+        break
+"
+```
+
+## cron 配置审查范式（2026-09-08 实战确立）
+
+**触发场景**：用户说"顺便排查 cron"/"看 cron 有没有问题"/"这个 cron 推送为什么搞错了 X"。
+
+**踩坑教训**：用户拍板"剧本是 K5d3... 已强调多次了"——但 cron `7875566b75f6` 的 prompt 写了 `Q1tBdNPMRoNQqcxzE0NcvdpHnGI`（杨编精撰独立版）当审读对象，**跑了 39 次**都没读过真主线。每天 8:30 输出"今日微调"推送——把 K5d3... 标成"另一版剧本"、把杨编精撰说成"主线正本"。`last_status=ok` 给了虚假安全感。
+
+**根因三层**：
+
+1. **cron prompt 写错对象 token**——LLM 严格按 prompt 跑，从不"猜"真实意图
+2. **MEMORY 里多条 token 登记已过期**（EsMD/NSZK 当正本）——agent 加载 cron prompt 时被旧记忆同向强化
+3. **用户对"正本是谁"的强调没传到 cron prompt 维护者**——cron 创建后没人复核 token 是不是变了
+
+**完整审查五步（必走全）**：
+
+### Step 1：拉全表 + 标基础异常
+
+```python
+cronjob_manage(action='list')
+# 重点看：last_status=ok 但 last_run_at 异常（比如每天跑 last_run_at 隔了 7 天）
+# 看：paused 状态的 job 和 paused_reason 是否为 null（无理由暂停 = 待排查）
+# 看：last_run_at=null 但 state=scheduled（从未跑过 = 配置可能缺依赖）
+```
+
+### Step 2：取完整 prompt（list 不支持过滤，必须读 jobs.json）
+
+```python
+import json
+d = json.load(open('C:/Users/HMSJ/AppData/Local/hermes/cron/jobs.json'))
+for j in d['jobs']:
+    print(j['id'], '|', j['name'], '|', j.get('deliver'))
+    print(j['prompt'])  # 完整 prompt
+    print('---')
+```
+
+**为什么必须读 disk**：`cronjob_manage list` 的 `prompt_preview` 截断到约 200 字符，**看不到 token/路径等关键身份字段**。
+
+### Step 3：核对 prompt 内的"对象身份"与磁盘事实
+
+对每条 cron，prompt 里如果引用了：token / URL / 文件路径 / 文档 ID / API endpoint / GitHub repo——**必须现场 fetch 或 stat 验证**：
+
+| 引用类型 | 验证方法 |
+|---------|---------|
+| 飞书 docx token | `lark-cli docs +fetch --doc <token>` 看实际内容是不是 prompt 说的"正本" |
+| 飞书 folder token | `lark-cli drive files list --folder-token <token> --as bot` 看子项 |
+| 文件路径 | `stat` 看 mtime + `head` 看内容 |
+| GitHub repo | `gh repo view <repo>` |
+| API endpoint | `curl -I <endpoint>` |
+
+**判定矩阵**：
+
+| prompt 写的 | 现场实测 | 结论 |
+|------------|----------|------|
+| token A = 正本 | fetch A = 正本 | ✅ 一致 |
+| token A = 正本 | fetch A = 旧版/独立版 | ⚠️ **token 写错**，必改 cron prompt |
+| token A 不存在 | fetch 失败 | ⚠️ **token 已废**，cron 在白跑 |
+| 文件路径 | 路径不在 | ⚠️ 路径漂移，必改 |
+
+### Step 4：查"对象变更"和"cron 创建时间"是否对齐
+
+cron 创建于 `created_at`（jobs.json 有），prompt 里 token 引用可能基于当时的事实。**如果 token 已有更替记录（MEMORY / OV / 飞书历史），cron prompt 没同步 = 必然错**。
+
+**判定**：跑 `viking_search` 或 grep MEMORY 看这个 token 历史上是不是有过"已废/被替代"事件——有就说明 cron prompt 该改了。
+
+### Step 5：产出三类修复建议
+
+```
+A. 改 cron prompt（最常见）—— 用 cronjob_manage update
+B. 改 MEMORY/OV 旧登记（必要时）—— viking_remember
+C. 跑 cron 验证（绝不建议手动 run）—— 等定时触发
+```
+
+**反向**：绝对不手动 `cronjob run` 验证（MEMORY 9/3 实战：手动 run 走当前会话进程走错代码路径 + 群推送噪音 + 更新基线让当天定时 run 判定无变化）。
+
+**修 cron prompt 的范式**（伏妖记 cron 修复实战，2026-09-08）：
+
+**首选：直改 `jobs.json`**（不走 `cronjob_manage update`，原因：长 prompt 字段传递可能丢内容/转义、update 必须把所有字段都带齐、cronjob_manage 是接口层不是 source of truth）
+
+```bash
+# 1. 改前基线（disk 三件套）
+stat -c '%y %s %n' "C:/Users/HMSJ/AppData/Local/hermes/cron/jobs.json"
+grep -c "<锚点 token>" "C:/Users/HMSJ/AppData/Local/hermes/cron/jobs.json"
+```
+
+```python
+# 2. Python 改（用变量承载原行，避免 heredoc 转义地狱）
+import json
+d = json.load(open('C:/Users/HMSJ/AppData/Local/hermes/cron/jobs.json', encoding='utf-8'))
+jobs = d.get('jobs', d) if isinstance(d, dict) else d
+target = next(j for j in jobs if j.get('id') == '7875566b75f6')
+prompt = target['prompt']
+
+# 关键：先 repr() 看真实字节，不要凭印象拼 old_string
+# >>> import re
+# >>> for line in prompt.split('\n'):
+# ...     if 'token_xxx' in line:
+# ...         print(repr(line))   # 看清楚 \\" vs \\\"
+
+old_segment = '<原段，从 repr() 复制字面字符串>'
+new_segment = '<新段>'
+assert prompt.count(old_segment) == 1, f'命中 {prompt.count(old_segment)} 次，放弃'  # 必须唯一
+target['prompt'] = prompt.replace(old_segment, new_segment)
+json.dump(d, open('C:/Users/HMSJ/AppData/Local/hermes/cron/jobs.json', 'w', encoding='utf-8'),
+          ensure_ascii=False, indent=2)
+```
+
+```bash
+# 3. 改后验证三件套（必走全）
+stat -c '%y %s %n' "C:/Users/HMSJ/AppData/Local/hermes/cron/jobs.json"  # mtime 变了 + 字节数有合理 diff
+grep -c "<新锚点 token>" jobs.json  # 新锚点 ≥1
+grep -c "<旧锚点 token>" jobs.json  # 旧锚点 = 0（或预期的注释残留次数）
+```
+
+**Python heredoc 转义陷阱**（2026-09-08 实战卡点）：bash heredoc 嵌套 Python 字符串时，反斜杠层级会爆。`\\\\\"` 在 shell + Python 双层解析后不是 `\\\"` 而是 5 字符字面。**根治**：把要替换的段先 `repr()` 出来看真实字节，再赋值给 Python 变量，最后用 `.replace()`——全程不靠"猜转义"。
+
+**非污染性功能验证**（不调 `cronjob run`）：
+- 不要 `cronjob_manage run` 验证（会污染基线 + 群推送噪音 + 走当前会话进程非 gateway）
+- 做法：从改后 prompt 里**抽那条 fetch/curl 命令**，单跑一次确认能拿到正确数据
+- 验证命令不写进 cron schedule、不发群——纯诊断
+
+**次选：`cronjob_manage update`**（适合单字段、prompt 短、不在意是否直改 disk 的场景）：
+```python
+cronjob_manage(action='update', job_id='7875566b75f6', prompt=<新版 prompt>)
+# 不写 schedule/deliver/skills/script——只覆盖要改的 prompt
+# 改完同样 disk 三件套验证
+```
+
+**配套铁律（持久化）**：
+
+- **MEMORY/OV 里的"对象身份"声明必须有创建日期 + 失效条件**——比如"剧本正本 K5d3... 截至 2026-09-08"——避免半年后 cron prompt 维护者不知道有变更
+- **每次对象变更（剧本换版 / folder 重命名 / API 迁移）必触发 cron prompt 审查**——把"对象变更"加进 cron 维护 checklist
+- **审查 cron 时不只查"跑没跑通"，更查"跑得对不对"**——`last_status=ok` 是必要条件不是充分条件
+
+## 飞书 folder 监控与登记范式
+
+> **配套 reference**: `references/feishu-folder-registry.md`（5 步法 + 反例 + 验证清单）
+
+飞书 folder 下的文档清单是**会动态增删**的（用户拍板 2026-09-08）。涉及飞书 folder token 的 cron prompt 必须每 N 周重盘：
+
+1. **定位真 folder token**：用户给的 `/drive/folder/<token>` URL 是唯一权威，根目录列不全（伏妖记这次实测：根 2 个 docx + 5 子 folder；递归到底 = 19 份）
+2. **递归列全树**：bot 身份可列（user 缺 `space:document:retrieve` 会 401）
+3. **每份 docx 实测 fetch**：folder 列表只给 name/token/mtime，**正文必须 fetch** 才知道是不是"正本"
+4. **角色身份必须标清**：主线正本 / 项目台账 / 旧版作废 / 上游素材 / 美术考据 / 测试文档——同名文件不实测 fetch 会把"独立剧集版"当"主线"（伏妖记 cron 39 次跑错根因）
+5. **台账落盘 + disk 验证**：写 `Projects/<项目>/文档台账.md`，stat mtime + grep 锚点 + wc 字节三件套
 
 ## GitHub 项目侦察模式（scripts/github_watch.py）
 

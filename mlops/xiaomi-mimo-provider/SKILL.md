@@ -24,6 +24,20 @@ XIAOMI_BASE_URL=https://api.xiaomimimo.com/v1
 
 Get API key at: https://platform.xiaomimimo.com
 
+> ⚠️ **PITFALL — never paste a real key into the chat.** The key will be
+> persisted in conversation history forever. If the user pastes a key in
+> chat, the right move is:
+> 1. Add a "rotate immediately" callout to the task body
+> 2. In follow-up kanban tasks / docs, write `sk-XXX...XXX` (4-prefix + 4-suffix
+>    only), never the full key
+> 3. Have the user write the real key directly into `~/.hermes/.env` (NOT
+>    through any chat message)
+> Plaintext keys in tasks = persistent credential leak. See
+> `references/mimo-as-memory-pipeline-llm.md` for the auth-header quirk that
+> often makes this scenario worse (works with both `api-key` and
+> `Authorization: Bearer`, so a leaked MiMo key via OpenAI-style adapters is
+> also a leak).
+
 ## Available Models & Capabilities
 
 | Model | Chat | Vision | Audio | TTS | ASR | Notes |
@@ -576,6 +590,57 @@ curl -s "$XIAOMI_BASE_URL/models" -H "Authorization: Bearer $XIAOMI_API_KEY"
 ### Test vision with base64 image
 MiMo vision API requires base64-encoded images (URL-based downloads may fail). Use `data:image/<type>;base64,...` format.
 
+### ⚠️ Vision request format — must use OpenAI `image_url` (NOT custom)
+
+**Wrong formats that all fail** (real failures 2026-08-26):
+
+```python
+# ❌ WRONG — custom content type, returns HTTP 500
+{"type": "image", "image": img_b64}
+
+# ❌ WRONG — top-level image field, returns HTTP 400
+{"image": img_b64, "messages": [...]}
+
+# ❌ WRONG — empty image_url.url, validation error
+{"type": "image_url", "image_url": {}}
+```
+
+**Correct format** (worked 2026-08-26):
+
+```python
+body = {
+    "model": "mimo-v2.5",
+    "messages": [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "描述这张图"},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
+        ]
+    }],
+    "max_completion_tokens": 500,
+    "thinking": {"type": "disabled"}  # MiMo v2.5 reasoning phase otherwise eats tokens
+}
+```
+
+**Diagnostic tells**:
+- HTTP 500 with `Internal Server Error` from `/v1/chat/completions` → wrong image content type
+- HTTP 400 → missing `image_url.url` field
+- 200 with `prompt_tokens_details.image_tokens > 0` → MiMo actually processed the image
+- `finish_reason: "length"` → `max_completion_tokens` too low for the description; bump to 500+
+
+**Pricing for OCR adapter pattern** (measured 2026-08-26, 1.3MB JPEG):
+- 2040 image tokens + 200 text = ~2400 total input tokens
+- Cost: ~¥0.0024 per image (using ¥1/MTok input cache miss)
+- Latency: 2-7s end-to-end
+
+**Why this matters for pipelines**: When using MiMo vision as the OCR stage in a
+memory ingestion pipeline (TencentDB Agent Memory `/capture` flow), short test
+captures may produce 0 L1-extracted memories — the LLM cannot extract
+"preferences" or "persona" from a single image description. For OCR to feed
+searchable knowledge, the user_content prompt must explicitly describe what
+entities/scenes to remember, OR the OCR description must be longer (multi-image
+batch = multiple memories per scene).
+
 ### Test chat
 ```bash
 curl -s "$XIAOMI_BASE_URL/chat/completions" \
@@ -595,3 +660,11 @@ curl -s "$XIAOMI_BASE_URL/chat/completions" \
 - **Hermes URL safety**: Hermes vision tool validates URL safety via DNS — some URLs may be rejected before reaching MiMo. Use local files when possible.
 - **Anthropic API**: MiMo supports Anthropic Messages API at `/anthropic/v1/messages` for image understanding. Uses `api-key` header.
 - **Local files**: ALL MiMo models require URL or base64 — no direct file upload support.
+
+## Pipeline-specific guidance
+
+For **memory extraction / agent pipeline** use cases (vs. interactive chat), MiMo's
+"slow reasoning" becomes a feature, not a bug. See `references/mimo-as-memory-pipeline-llm.md`
+for: cost estimates, the `api-key` vs `Authorization: Bearer` header quirk for
+pipeline adapters, role asymmetry (extraction vs recall hot path), and the
+multimodal `/capture` interaction with TencentDB Agent Memory.

@@ -67,6 +67,11 @@ snapshot 是缩进文本树。关键模式：
 - 鉴权方式不统一：目标站可能用 API Key / HMAC 签名 / OAuth
 - `browser_snapshot(full=true)` 输出的 snapshot 经常超过 15000 字符被截断，**必须用返回文件路径重新 `read_file`** 获取完整内容。不要依赖 inline snapshot 提取参数表。
 - `browser_console` 的表达式长度有限制（复杂 JS 或超大 payload 可能截断），但 `document.body.innerText` 一般可正常返回完整页面文本（已验证约 95KB 正常）。如需提取纯文本内容，推荐用 innerText 替代 snapshot 方式。
+- **`web_extract` 对 SPA 返 `no content extracted`**：不要重试 `web_extract`，直接走浏览器 innerText。2026-08-31 实测 docs.volcengine.com 任意 URL 都触发此 bug。
+- **JS 表达式不能写 Python 切片语法**：`document.body.innerText[:3000]` 在浏览器 JS 里 SyntaxError。分块必须先取完整字符串回 Python 再切：`text = js("document.body.innerText"); print(text[:3000])`。
+- **`innerText` 后用 Python 分块打印**比 `browser_snapshot(full=true)` 更适合超长页（实测 13K 字符页一次取回，按 3000 切 5 块即可读完；snapshot 对超长页分块读不全）。
+- **`page_info()` 不是必须**：`js("document.title") + js("window.location.href") + js("document.body.innerText.length")` 三连更精确，能确认 SPA 是不是已渲染。
+- **`page_info()` 空响应 = SPA 还没渲染完**：`new_tab(url)` 后 `page_info()` 返 `output: ""` 是常态，必须 sleep 3-5 秒再调一次。
 
 ## 侧边栏点击法（SPA重定向页面）
 
@@ -107,6 +112,8 @@ snapshot 是缩进文本树。关键模式：
 |------|------|
 | `references/volcengine-api-docs.md` | 火山引擎豆包语音API文档站特定模式：URL重定向检测、有效/失效页面清单、参数模式、HTML表格模式 |
 | `references/spa-volcengine-extraction.md` | 火山引擎文档抓取实战记录：有效方法、踩坑记录、最终文档结构 |
+| `references/openviking-write-repro.md` | OpenViking 写盘链路完整复现 + 文档复现法五步 + 2026-08-31 根因（encrypt_stage 锁） |
+| `references/curl-multipart-msys-trap.md` | curl `-F multipart + MSYS /tmp` HTTP_CODE=000 陷阱 + 三种修复（Python requests 最稳） |
 
 ## HTML 表格提取
 

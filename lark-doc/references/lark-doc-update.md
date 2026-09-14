@@ -107,9 +107,37 @@ lark-cli docs +update --doc "<doc_id>" --command str_replace \
 ```
 
 > **⚠️ str_replace 三大实战坑（2026-08-06 伏妖记项目文档实测）：**
-> 1. **`--content ""` 删除 = 删除全部匹配，不是第一个**。`--pattern` 在文中出现 N 次就全删 N 处——如果只想删一处而文本里恰好重复，会误删所有副本（实测：镜妖"她的苦"三重动机整段重复，`--content ""` 把两处全删，内容一度丢光）。**删除前先 `docs +fetch --scope keyword --keyword <片段>` 数出现次数**；出现 >1 次时改用 `block_delete --block-id` 精确定位。
-> 2. **静默失败：返回 `"ok": true` 不代表替换生效**。XML 模式 `--pattern` 只匹配行内文本，pattern 含 `<h2>`/`<table>` 等块级标签或跨 block 时，命令返回 ok 但内容没变。**替换后必须 `docs +fetch` 验证**，不能信返回值。
-> 3. **pattern 需精确匹配**：str_replace 是字面匹配非模糊——pattern 与文档实际文本差一个字（含全角/半角、空格、换行）就匹配不上（同样静默返回 ok）。建议 pattern 从 `docs +fetch` 的原文里**复制**，不要手打。
+1. **`--content ""` 删除 = 删除全部匹配，不是第一个**。`--pattern` 在文中出现 N 次就全删 N 处——如果只想删一处而文本里恰好重复，会误删所有副本（实测：镜妖"她的苦"三重动机整段重复，`--content ""` 把两处全删，内容一度丢光）。**删除前先 `docs +fetch --scope keyword --keyword <片段>` 数出现次数**；出现 >1 次时改用 `block_delete --block-id` 精确定位。
+2. **静默失败：返回 `"ok": true` 不代表替换生效**。XML 模式 `--pattern` 只匹配行内文本，pattern 含 `<h2>`/`<table>` 等块级标签或跨 block 时，命令返回 ok 但内容没变。**替换后必须 `docs +fetch` 验证**，不能信返回值。
+3. **pattern 需精确匹配**：str_replace 是字面匹配非模糊——pattern 与文档实际文本差一个字（含全角/半角、空格、换行）就匹配不上（同样静默返回 ok）。建议 pattern 从 `docs +fetch` 的原文里**复制**，不要手打。
+
+### str_replace 静默失败 → 降级到 block_replace（标准恢复流程）
+
+坑 2 + 坑 3 合并触发的恢复路径。判定标准：`docs +update --command str_replace` 返回 `ok:true` 后，`docs +fetch` 拉回的 content 里 pattern 字符串仍在原文里——这就是静默失败。**不要在 str_replace 上反复调整 pattern**（全角引号、换行、连续空白字符差一字就会失配），立刻降级：
+
+```bash
+# 1. 取 block_id
+lark-cli docs +fetch --doc "<doc>" --doc-format xml --detail with-ids \
+  | grep -oE '<p id="[^"]+">[^<]*<含 pattern 关键字>'
+
+# 2. 直接 block_replace 整段覆盖
+lark-cli docs +update --doc "<doc>" --command block_replace \
+  --block-id "<拿到的 block_id>" \
+  --content "<新段落完整 XML>"
+```
+
+`block_replace` 走 block_id 定位，不依赖 pattern 字面匹配，所以是 str_replace 失配后的**唯一可靠兜底**。注意 block_replace 一次只改一个 block，多段改动需要每个 block 单独 replace，不要在 `--content` 里塞多个 `<p>`（飞书会按第一个解析）。
+
+### `--as user` 权限陷阱
+
+lark-cli 的 `defaultAs` 默认是 `bot`，但**用户身份创建的文档 bot 没有编辑权**。症状：第一次 `docs +update` 可能碰巧通过（bot 被 owner 单独授权过），但下一次突然报 `4030004 No permission to operate on this document`。**所有 update 操作必须显式带 `--as user`**，包括 str_replace / block_replace / append 全系指令：
+
+```bash
+lark-cli docs +update --as user --doc "<doc>" --command ...   # 正确
+lark-cli docs +update --doc "<doc>" --command ...             # 默认 bot，可能 403
+```
+
+fetch / create 也推荐 `--as user`（脚本默认值 `defaultAs=bot` 在不同 lark-cli 版本可能切换）。判断身份是否对：返回 JSON 的 `identity` 字段必须是 `"user"`。
 
 ### block_insert_after — 在指定 block 之后插入
 

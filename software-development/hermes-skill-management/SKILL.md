@@ -380,3 +380,42 @@ Hermes skills 仓库（`AppData/Local/hermes/skills`）是 git 仓库但**运行
 3. **误嵌的嵌套仓库（gitlink）**：`git status` 显示 ` m <dir>`（小写 m = submodule 级改动）且目录内有独立 `.git`——是误嵌入的独立 skill 仓库。`git rm --cached <dir>` 移出追踪（磁盘文件保留），别删目录
 4. **空目录**：git 不追踪空目录，`?? <dir>/` 显示为空壳目录时直接 `rmdir`，不影响仓库
 5. **提交后验证**：`git status --short` 干净 + `git log --oneline -N` 确认提交序列清晰
+
+## Skill 大小实战铁律（2026-08-27 巩固）
+
+> 从 MEMORY.md 迁出（Phase 6 精简）。本节是上一节"SKILL.md 膨胀诊断"的精简版实战铁律，详情见上方诊断章。
+
+### 三大铁律
+
+1. **SKILL.md 无硬性上限**，但 [SKILL_PRUNED] 是上下文压缩对超大 skill 的剪裁（**非文件拒绝**）
+2. **`references/` 按需加载**（`skill_view(name=..., file_path=...)` 精准取用）
+3. **目标 <50K chars**（健康基线：妖玉影视知识库 31KB bytes / 13K chars）
+
+### SKILL_PRUNED 的真相
+
+- 不是 skill 拒绝加载，是**上下文压缩对超大 skill 内容的剪裁**
+- 触发线：约 99K chars（196KB bytes）必触发
+- 现象：子代理看到 `[SKILL_PRUNED]` 标记 + 部分内容
+- 修复：拆章节到 `references/` 子目录，正文只留"骨架+索引"
+
+### references/ 加载机制
+
+```
+skill/
+├── SKILL.md           ← 正文 <50KB，列章节+索引
+├── references/        ← 子目录可放任意内容
+│   ├── api.md         ← 按需加载（skill_view file_path='references/api.md'）
+│   └── deep-dive.md
+├── templates/         ← 模板（同样按需）
+├── scripts/           ← 可执行脚本
+└── assets/            ← 静态资产
+```
+
+**`skill_view(name=..., file_path='references/api.md')` 才能加载子文件**——直接读 `references/` 不在 skill API 范围内。
+
+### 实战案例：director-aesthetic-card 膨胀→瘦身
+
+- 起因：子代理每轮追加内容，从 50KB 膨胀到 196KB，触发 PRUNED
+- 修复：拆 12 个章节到 `references/导演-aesthetic/` 子目录
+- 正本 SKILL.md：196KB → 93KB（仍超 50K，继续拆）
+- 第二轮：93KB → 47KB（达标）

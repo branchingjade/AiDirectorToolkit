@@ -114,3 +114,47 @@ Windows 上 `~/.hermes/` 和 `$HERMES_HOME`（`~/AppData/Local/hermes/`）是两
 - **浏览模式**：`session_search()` 不带 query，浏览所有近期会话，再按返回的 `source` 字段手动过滤
 - **直接 SQL**：`SELECT * FROM sessions WHERE source='feishu' AND started_at > ...`，不走 FTS
 - **宽泛 FTS 查询**：搜高频中文词（"的""了"）而非平台名，但不如上面两种可靠
+
+## 两套 scripts/ 目录陷阱（2026-09-03 飞书渠道链路摸底发现）
+
+**Hermes 上存在两个 `scripts/` 目录，cron prompt 只认其中一处**：
+
+```
+# A. Hermes 平台脚本（cron 实际读）
+C:/Users/HMSJ/AppData/Local/hermes/scripts/
+  ├── feishu-daily-digest.py        ← cron 提示词里引用的脚本
+  ├── feishu-collab-health.py       ← 同上
+  ├── feishu-channel-health.py      ← 同上
+  ├── feishu-orphan-messages.py
+  └── ...
+
+# B. 用户工作区脚本（cron 不会读）
+C:/Users/HMSJ/Documents/Hermes/scripts/
+  ├── feishu_to_tdb.py              ← TDB 时代已死的脚本，连端点都失效
+  ├── member_profile_lookup.py
+  ├── migrate_vault_*_to_tdb.py
+  ├── ...
+```
+
+**症状与识别**：
+- cron 任务报 `command not found` / `No such file or directory` → 第一怀疑是 prompt 里的脚本路径指错位置
+- 用户写了"我刚加了个脚本"但 cron 没跑起来 → 极可能加到 B 目录（用户工作区）而不是 A 目录（cron 入口）
+- `rg "feishu-daily-digest"` 在两个目录都能命中——区分依据是**内容而非位置**：cron prompt 里的路径绝对以 `C:/Users/HMSJ/AppData/Local/hermes/scripts/` 开头
+
+**处置规则**：
+- **cron 调用的脚本必须落在 A 目录**：cron 进程的 cwd 是 Hermes home，不会扩展 PATH 找 B
+- **B 目录 = 用户手动运行的工具/一次性脚本/考古迁移脚本**：TDB 时代残留物都堆在这里，仍可见但不会被任何 cron 触发
+- 不要混：把 B 的 TDB 死脚本移到 A 没用（端点死），**应在 B 目录就地标记为 `__ARCHIVED_TDB_ERA__` 或 `_archive/` 隔离**——判断「真死 vs 还能跑」的标准是对应 **HTTP 服务端/进程是否还在响应**（不是看脚本能不能跑通——脚本永远不会主动报错"我死了"）
+- 用户让你"找个 cron 用的脚本"——**永远先 ls A 目录**（cron 的 cwd 工作根），别 ls B
+
+**验证方法**：
+```bash
+# 1. 查 cron prompt 引用了哪些脚本路径（拿真值）
+rg "C:/Users/HMSJ/AppData/Local/hermes/scripts/[^'\")\\s]+\\.py" ~/AppData/Local/hermes/cron/jobs.json
+# 2. 验证每个被引用的脚本真实存在（删过的/路径错的必漏掉）
+for s in $(rg -o "C:/Users/HMSJ/AppData/Local/hermes/scripts/[A-Za-z0-9_-]+\\.py" ~/AppData/Local/hermes/cron/jobs.json | sort -u); do
+  [ -f "/c/Users/HMSJ/AppData/Local/hermes/$s" ] && echo "✓ $s" || echo "✗ MISSING $s"
+done
+```
+
+**为什么这条坑每次复用**：cron 调试时下意识 ls `Documents/Hermes/scripts/`（用户写新工具的常规落点），漏掉 A 目录才是最常见。脚本找不到的根因通常是路径指向而不是脚本本身坏了。

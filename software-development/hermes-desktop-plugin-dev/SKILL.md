@@ -1,7 +1,7 @@
 ---
 name: hermes-desktop-plugin-dev
 description: "Hermes 桌面插件开发实战（本机验证的架构与坑）。触发词：桌面插件、desktop plugin、PluginContext、require fs、mux-token、dsh-inbox、render process、Electron sandbox。"
-version: 1.1.0
+version: 1.2.0
 tags: [hermes, desktop, plugin, development]
 ---
 
@@ -13,9 +13,9 @@ tags: [hermes, desktop, plugin, development]
 
 | 组件 | 路径 | 说明 |
 |---|---|---|
-| 前端 | `~/AppData/Local/hermes/desktop-plugins/<id>/plugin.js` | 纯 ESM，写入即热加载（几秒内生效，出错有 toast），无需重启 |
+| 前端 | `~/AppData/Local/hermes/desktop-plugins/<id>/plugin.js` | 纯 ESM，写入即热加载（几秒内生效，出错有 toast），**仅限已注册的 plugin** |
 | 后端 | `~/AppData/Local/hermes/plugins/<id>/dashboard/manifest.json` + `plugin_api.py` | FastAPI `router`，挂载在 `/api/plugins/<id>/`，业务逻辑放同目录 `<id>/service.py` |
-| 注册 | `config.yaml` → `plugins.enabled` 列表 | 不加这个，后端永不挂载（web_server.py 的安全门禁，source=user 必须 enable） |
+| 注册 | `config.yaml` → `plugins.enabled` 列表 | **不加这个 = 整个插件完全不加载**（前端 + 后端都无效，且**不报错不提示**） |
 
 manifest.json 最小结构：`{"name": "<id>", "label": "...", "description": "...", "version": "1.0.0", "tab": {"hidden": true}, "api": "plugin_api.py"}`。
 
@@ -72,7 +72,157 @@ manifest.json 最小结构：`{"name": "<id>", "label": "...", "description": ".
 - `ConfirmDialog`：`open/onClose/onConfirm(async)/title/description/confirmLabel/destructive/dismissOnConfirm`。
 - 对话框打开时用 `key={target?.id}` 强制重建组件（useState 初始值只读一次，避免渲染期 setState）。
 - 打开历史会话：`host.navigate('/' + encodeURIComponent(sessionId))`（SESSION_ROUTE_PREFIX='/'）。
-- 侧边栏导航：`ctx.register({area: SIDEBAR_NAV_AREA, data: {path, label, codicon}})`；全页面：`{area: ROUTES_AREA, data: {path}, render}`；命令面板：`{area: PALETTE_AREA, data: {id, title, keywords}, run}`。
+- 侧边栏导航：`ctx.register({area: SIDEBAR_NAV_AREA, data: {path, label, codicon}})`；全页面：`{area: ROUTES_AREA, data: {path}, render}`；命令面板：`{area: PALETTE_AREA, data: {id, title, keywords}, run}}`。
+
+### ⚠️ `PALETTE_AREA is not defined` ReferenceError 根因（dsh-web-panel 2026-08-20 实测）
+
+错误形态：
+```
+completion-sound-BFZKOsFC.js:3 [plugins] runtime load failed (dsh-web-panel)
+ReferenceError: PALETTE_AREA is not defined
+  at Object.register (a9c5dd8f-...:111:11)
+  at c (completion-sound-BFZKOsFC.js:3:31515)
+```
+
+**根因**：`import { ..., PALETTE_AREA, ... } from '@hermes/plugin-sdk'` 中你删了 PALETTE_AREA 名字但 register() 里还在用——runtime 加载器按 import 列表反射 SDK 符号成 shim blob，**没在 import 里的名字运行时是 undefined**。
+
+**为什么报错信息指 `Object.register` 内部而不是你的代码**：`ctx.register({...})` 第一次在内部展开/校验你传入的对象时，访问 PALETTE_AREA 触发 ReferenceError，错误堆栈在 SDK shim 内部而不是你的源代码行号——让你误以为 SDK 坏了。
+
+**修复纪律**：
+- 任何对 SDK named export 的使用，**先 grep import 再 grep 用法**——`grep -n "PALETTE_AREA" plugin.js` 同时看到 import 行 + 用法行
+- patch 工具清理 import 时，**手动检查 import 集合 vs 用法集合**——把"删除未用 import"留给 ESLint（`--fix`），人工 patch 只做必要的删
+- 同一原则适用任何 SDK export：`PANES_AREA` / `ROUTES_AREA` / `SIDEBAR_NAV_AREA` / `PALETTE_AREA` / `TITLEBAR_AREAS` / `KEYBINDS_AREA` —— 任何一处少了 import + register 用了 = 同款 ReferenceError
+
+**同类变种（运维面板实测）**：`TITLEBAR_AREAS` 写成 `TITLEBAR_ARE`（少一个字母）→ 静默渲染空白（不抛错但效果不对）。SDK 名字都是 snake-case，**复制粘贴**比手敲可靠。
+
+### 面板内嵌入外部 URL —— `PANES_AREA + placement: 'floating'` + iframe（2026-08-20 实测）
+
+**用户原话**：「我想要的是 Hermes 预览框一致的体验」+「宿主必须是 hermes」+「单独的面板」——即「在 Hermes 桌面里、能拖动、可折叠、跟 chat 预览一致的独立面板」。
+
+**死胡同（按顺序否掉的方案，全是错解）**：
+
+| 方案 | 否决原因 |
+|---|---|
+| 插件路由面板里 `<iframe>` | 不在 layout tree，不能拖动/折叠/关闭 |
+| `window.open(url, ..., 'width=1280,height=820')` | 系统浏览器窗口，**不在 Hermes 里**——用户原话「我自己开浏览器不就行了」 |
+| 改主仓库加 `host.preview(url)`（PR #90437） | 体验正确但要走 PR 等合并；用户没耐心等 |
+| 改主仓库加 `host.openWindow(url)`（独立 Electron BrowserWindow） | 工作量是 host.preview 的 3-4 倍，且不是用户要的"单独面板" |
+
+**正解**：`PANES_AREA + placement: 'floating'`。PANES_AREA 在 `apps/desktop/src/sdk/index.ts:250` 暴露（`'panes'` 字符串 area），`placement: 'floating'` 的 pane **opt out of layout tree**——它作为独立浮动 pane 渲染（floating-panes.tsx + floating-rect.ts），用户能拖动、折叠、关闭、锚定（`anchor: 'top-right'`），体验跟 chat 预览 pane 100% 一致。**content 是 React 组件**，所以里面塞 iframe 即可（无需 SDK 改动、无需主仓库改动）。
+
+**注册契约**：
+
+```js
+import { PANES_AREA } from '@hermes/plugin-sdk'
+
+ctx.register({
+  id: 'dsh-web-ui',
+  area: PANES_AREA,
+  title: 'DSH Web UI',
+  data: { placement: 'floating', anchor: 'top-right', width: 960, height: 640 },
+  render: () => jsx(DSHWebPane, {}),  // 组件里塞 iframe
+})
+```
+
+**iframe 范式**（DSH Web Pane 实测）：
+
+```js
+function DSHWebPane() {
+  const url = 'http://127.0.0.1:8080/'
+  const [key, setKey] = useState(0)  // bump → 强制 iframe 重新加载
+  const iframeRef = useRef(null)
+  return jsxs('div', {
+    className: 'flex flex-col h-full w-full',
+    children: [
+      jsxs('div', { className: 'flex items-center gap-2 px-2 py-1 border-b ...',
+        children: [
+          // 状态点 + URL + 刷新按钮
+          jsx(Button, { onClick: () => setKey(k => k + 1), children: '刷新' }),
+        ]
+      }),
+      jsx('iframe', {
+        ref: iframeRef,
+        key,  // 改 key 触发 unmount/remount
+        src: url,
+        className: 'flex-1 w-full',
+        style: { border: '0', minHeight: 0 },
+        referrerPolicy: 'no-referrer',
+        sandbox: 'allow-scripts allow-same-origin allow-forms allow-popups',
+      }),
+    ],
+  })
+}
+```
+
+**关键陷阱**：
+- iframe 一定要 `flex-1` + `minHeight: 0`，否则父容器没有 flex 高度时 iframe 高度坍塌为 0
+- `key` state 是绕过同源策略下"iframe.contentWindow.location.reload() 跨域不可调"的合规手段（同源可调；跨域 fall back to setKey）
+- `sandbox` 至少给 `allow-scripts allow-same-origin`，否则目标 URL 大部分功能瘫痪（DSH web UI 用 React + Vite + WebSocket，缺 same-origin 直接挂）
+- `referrerPolicy: 'no-referrer'` 防泄漏 referrer header
+- 浮动 pane 的 placement 只接受 `'left' / 'right' / 'main' / 'floating'` 等枚举值（见 `apps/desktop/src/components/pane-shell/tree/store.ts:808`），`floating` 是唯一非 tiling 的
+
+**何时用浮动 pane + iframe（vs host.preview）**：
+
+| 场景 | 选 |
+|---|---|
+| 目标 URL 在 Hermes 内始终开着（监控 / Web UI / dev server） | **floating pane + iframe** —— 持久挂在 layout 里，可拖动 |
+| 临时打开（点按钮看一下然后关） | host.preview(url) —— 走 preview pane 临时 tab，关闭即销毁 |
+| 跨页面状态（多个 URL 之间切换、不同 schema） | host.preview |
+| 零 SDK 改动可接受 | floating pane + iframe |
+| 用户愿意等 PR 合并 | host.preview / host.openWindow |
+
+> dsh-settings 2026-08-20 实测：先用 host.preview fallback（PR #90437 待合并）+ 复制 URL，再用 PANES_AREA + floating iframe + iframe 内容 —— **最终方案就是后者**，因为体验与"运维面板/预览 pane"完全一致、不依赖主仓库、立即可用。**两条路并存**：host.preview 处理临时打开（点按钮 → 临时 tab），floating pane 处理持续打开（layout 里固定位）。
+
+## 插件打开 Hermes 预览面板（preview pane）—— `host.preview(url)`（2026-08-20 实测）
+
+plugin-sdk 1.x 只暴露 `host.state.* / notify / notifyError / logs / navigate / onEvent / restartGateway / status / request`（apps/desktop/src/sdk/index.ts:58）。**没有原生 `host.preview`**——`store/preview.ts` 的 `openPreview()` 只接受 `tool-result / file-browser / artifact / manual` 四种来源，插件不在其内。
+
+**当前状态（2026-08-20 PR 已关闭，方案暂搁置）**：
+
+- 提案加 `host.preview(url: string)` → `openPreview({ kind: 'url', label: url, source: 'plugin', url }, 'manual')`
+- PR：NousResearch/hermes-agent#90437（fork `branchingjade/hermes-agent` 的 `feat/plugin-sdk-host-preview` 分支，commit `8a6eb8c7c`）
+- SDK 一加新方法 → runtime 插件自动可用（`sdkImportMap` 把 `__HERMES_PLUGIN_SDK__` 全部 named exports 反射成 shim blob，runtime-loader 的 `installPluginSdk()` 注入 `globalThis`，plugin import `@hermes/plugin-sdk` 自动解析到 shim）
+
+**合并前 plugin 的写法（fallback 模式让老 SDK 不崩）**：
+
+```js
+const hasPreviewAPI = typeof host.preview === 'function'
+
+function handleOpen(url) {
+  if (hasPreviewAPI) {
+    try { host.preview(url); return } catch (e) { /* 落到下面 */ }
+  }
+  // fallback: 复制 URL 让用户手动粘贴到预览窗
+  navigator.clipboard.writeText(url)
+}
+
+// 面板内同时显示诊断信息（用户能立刻知道为啥没生效）
+jsx('span', { children: hasPreviewAPI
+  ? '✓ host.preview 已连接（点按钮 → 直接打开预览窗）'
+  : '⚠ host.preview 未就绪（需 Hermes Desktop 升级到含 PR #90437 的版本）' })
+```
+
+**改 plugin-sdk 时的技术纪律（dsh-settings 实测）**：
+
+1. **缩进坑**：patch 工具在 `replace` 模式默认会保留 old_string 的缩进而 new_string 的"逻辑缩进"被搞乱——**直接用 Python 写文件、精确控制字符**比 patch 工具可靠
+2. **类型校验**：`PreviewTarget.source: string`（free-form）—— `source: 'plugin'` 合法；`PreviewRecordSource = 'manual' | 'tool-result' | ...`（4 个值）是 `openPreview` 第二参—— `'manual'` 适用于 URL target
+3. **URL no-op**：`if (typeof url !== 'string' || !url.trim()) return`——插件写错也不崩
+4. **fork 不存在的常见情况**：`gh repo fork NousResearch/<repo> --remote-name=origin` 创建 + 重写 remote；首次 push 报错"Repository not found"通常是 fork 真不存在（不是权限），ls-remote 确认
+5. **不要改外部 SDK 引用即可用**：`apps/desktop/src/sdk/index.ts` 已是 renderer 内部模块，`runtime-loader.ts` 的 shim 机制保证 plugin import `@hermes/plugin-sdk` 自动拿到新方法——**不需要改 runtime-loader、不需要改 SDK shim、不需要 IPC**
+
+**何时不需要 host.preview**：
+
+- 仅要"用户跳出 Hermes 看 URL" → `<a target="_blank">`（用户自己控制）
+- 面板内嵌预览 → `<iframe src="...">`（仅面板内、不能切换出去）
+- 不在 Hermes 桌面 app 内的独立窗口 → `window.open(url, ...)`（系统浏览器，与用户原话"我自己开浏览器不就行了"等价，**不算 plugin 工作**）
+
+**何时该推主仓库 PR 加 host.preview**：
+
+- 用户明确要"在 Hermes 预览窗里看 X" + 接受走 PR 流程
+- 不能用 iframe 替代（如要看跨页面状态、不同 URL 之间切换）
+- 工作量 ~1 文件（sdk/index.ts） +12 行 +PR 流程（不是 6 文件——之前估计错了）
+
+> dsh-settings 2026-08-20 实测状态：已改用 `host.preview` + 复制 URL fallback（PR #90437 等待合并前走 fallback）。**用户两次否决 iframe / 系统浏览器窗口方案**——确认唯一正解是改主仓库 SDK。
 
 ## 前端模式补充（v1.2 迭代后）
 

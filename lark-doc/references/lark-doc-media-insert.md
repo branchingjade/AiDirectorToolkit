@@ -108,7 +108,36 @@ lark-cli docs +media-insert --doc doxcnXXX --from-clipboard --width 800 --height
 > [!CAUTION]
 > 这是**写入操作**（会修改文档内容）—— 执行前必须确认用户意图。
 
+## ⚠️ 已知限制：不能插入到 table cell 内
+
+`+media-insert` 的 `--selection-with-ellipsis` 选区匹配 cell 内容时，图片**不会落在 cell 内**，而是落到 cell 的 top-level ancestor（通常是表格外的某个容器），且报错 `"invalid token"`（code -32602）如果跨多 block 匹配。
+
+**实战后果**：用户说"把这张图插到表格里"——`+media-insert` 做不到。
+
+## ✅ 兜底模式：insert-到-末尾 + move-到-表格后
+
+**完整套路**（2026-09-03 实测，可复用）：
+
+1. `lark-cli docs +media-insert --doc <URL> --file ./xxx.jpg --caption "..."` → 返回末尾 image block_id
+2. `lark-cli docs +update --doc <URL> --command block_move_after --block-id <目标锚 block_id> --src-block-ids <刚拿到的 block_id>`
+3. `lark-cli docs +fetch --doc <URL> --scope range --start-block-id <目标锚 block_id> --end-block-id <目标锚 block_id>` 验证图片已落到目标位置
+
+**目标锚选法**：
+- 插到「表格 X 后、下一段前」：用 X 的 table block_id 作为锚（block_move_after 会把图紧贴表格后）
+- 插到「表格 X 内某行 cell 后」：**做不到**——改用"表格 X 后追加 caption + image 段落"，让图与该行 caption 一一对应
+
+**示例**：表格 X block_id = `doxcnABC`；想给表格内 6 行各配 1 张图——做法是表格 X 后追加 6 张图段落（每张 caption 标注器物本名），不要试图塞进 cell。
+
+## 路径与匹配踩坑
+
+| 报错 | 原因 | 解法 |
+|------|------|------|
+| `unsafe file path: --file must be a relative path` | `--file` 必须相对路径 | `cd <目录>` 然后传 `./文件名`；不要传绝对路径 `C:/...` |
+| `Locating block matching selection...` + `code: -32602 invalid token` | `--selection-with-ellipsis` 跨多 block 匹配 | 用 `start...end` 限定单 block，或改用 `--block-id` 路径（先 insert-到末尾 + block_move_after） |
+| `--doc "/wiki/..."` 解析失败 | `--doc` 不自动 extract `/wiki/` 形式（部分版本支持） | 用 `docs +fetch` 拿到的 `document_id`（`doxcnXXX` 形式）作为 `--doc` 参数 |
+
 ## 参考
 
 - [lark-doc-fetch](lark-doc-fetch.md) — 获取文档内容（可用于确认插入后的结果、以及提取媒体 token）
+- [lark-doc-update](lark-doc-update.md) — `block_insert_after` / `block_move_after` / `block_replace` / `block_delete` 局部精修
 - [lark-shared](../../lark-shared/SKILL.md) — 认证和全局参数

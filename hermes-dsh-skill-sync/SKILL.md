@@ -2,13 +2,15 @@
 name: hermes-dsh-skill-sync
 description: DSH 与 Hermes 技能库约定——2026-08-19 晚起 DSH 直连 Hermes 正本：~/.dsh/skills 是 junction → %LOCALAPPDATA%\hermes\skills，不存实体副本、无需手动同步，Hermes 侧改技能即热生效。当需要新建 skill、决定 skill 放哪、排查 skill 不同步时使用。
 whenToUse: 新建或维护 skill 时必读；两侧技能库出现不一致、不知道新 skill 该写到哪里时使用。
-version: 3.0.0
+version: 3.0.1
 author: 妖玉
 license: MIT
 metadata:
   hermes:
     tags: [DSH, Hermes, 技能库, junction, 直连]
     related_skills: [hermes-workspace-conventions]
+    changelog:
+      - 3.0.1 (2026-08-27): ⚠️ DSH 已归档。本 skill 保留供考古，**不要按本 skill 的双侧同步 junction 方案实施**——DSH 进程已停止，junction 已无效。
 ---
 
 # DSH × Hermes 技能库约定（2026-08-19 晚直连版）

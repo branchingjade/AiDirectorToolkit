@@ -1,7 +1,7 @@
 ---
 name: songwriting-and-ai-music
 description: "Songwriting craft and Suno AI music prompts."
-version: 2.1.0
+version: 2.2.0
 tags: [songwriting, music, suno, parody, lyrics, creative]
 platforms: [linux, macos, windows]
 triggers:
@@ -12,6 +12,9 @@ triggers:
   - parody song
   - adapting a song
   - AI music generation
+  - 纯器乐配乐
+  - 中国传统器乐
+  - 国潮配乐
 ---
 
 # Songwriting & AI Music Generation
@@ -467,6 +470,11 @@ See [references/instrumental-scoring-suno.md](references/instrumental-scoring-su
 - Character theme design for long-form drama
 - Preventing Suno from adding unwanted vocals
 - Structure-only metatags for instrumental tracks
+- **纯中国传统器乐配器决策模式** (配器-情绪映射、Suno 乐器稳定性、鼓组决策)
+- **结构弧线术语** (慢/渐快/快顶/慢落 四段式及 Suno 翻译)
+- **意象-结构契合度自检** (用户已知案例：少年侠客 DnB 钢琴 4/10 不契合)
+- **双语版本固定约定** (英文版≤1000 字符给 Suno，中文版留底)
+- **聊天框输出约定** (不裹代码块，方便复制)
 
 ## 11. Craft Playbook
 
