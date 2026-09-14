@@ -7,6 +7,10 @@
     {
       "repo": "https://github.com/DevvGwardo/impeccable",
       "path": "skills/"
+    },
+    {
+      "repo": "https://github.com/NanmiCoder/dsh-agent-teams",
+      "path": "skills/"
     }
   ]
 }
