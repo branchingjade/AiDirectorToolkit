@@ -31,6 +31,10 @@ zoom-out/
 .usage.json
 .usage.json.lock
 
+# skill-hub 运行时缓存（不入库）
+.hub/index-cache/
+.hub/scan-cache/
+
 # Python 缓存（不入库）
 __pycache__/
 *.pyc
