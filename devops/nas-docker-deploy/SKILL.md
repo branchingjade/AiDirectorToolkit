@@ -94,3 +94,9 @@ python3 -c "import subprocess; subprocess.run(['sudo','-S','systemctl','enable',
 4. **Docker volume vs bind mount** — Named volumes (`doubao_tts_data:`) persist across rebuilds and live in `/volume1/@docker/volumes/`. For explicit paths, use bind mounts (`- /volume1/data:/data`).
 
 5. **sqlite3 .db in Docker** — set `DB_DIR=/data` env var + mount volume to `/data`. File persists in named volume.
+
+
+## References
+
+- `references/crane-and-mihomo-nas.md` — crane binary + mihomo proxy pattern for NAS where daemon proxy can't be configured
+- `references/nas-deployment-pitfalls-20260826.md` — line endings, paramiko background processes, plugin deployment, env vars, Feishu adapter, mihomo dat vs mmdb format

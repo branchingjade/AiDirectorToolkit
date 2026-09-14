@@ -55,8 +55,10 @@
 ## 评论会话机制（协作接入后）
 
 - session key：`comment:{项目}:{from_open_id}`（未路由到项目时 `comment:doc:{type}:{token}:{open_id}`）——**按项目+人隔离**，多用户不串台
-- 持久化到 `Obsidian Vault/_hermes/评论会话/<percent编码key>.json`（重启不丢；2026-08-07 起迁入 vault），TTL 1h、50 条
-- 与聊天会话（state.db）完全隔离：不进会话列表、不触发聊天路由、不出现在桌面端
+- **持久化（2026-09-03 起 = state.db 双写 + 内存缓存）**：每次 `_save_session_history` 同时写（1）`messages` 表（role+content+timestamp，session_id=key）+（2）`sessions` 表（id=key, source='comment', title, user_id, message_count, started_at, last_activity_at，UPSERT 幂等，started_at 保留首次值）；`source='comment'` 是侧边栏「飞书评论」平台的过滤键。TTL 7 天（覆盖常规审稿节奏）。**仅当 sessions 行写入成功，桌面侧边栏才会显示该评论会话**。完整设计与代码位置见 [`../../hermes-feishu-internals/references/comment-session-persistence.md`](../../hermes-feishu-internals/references/comment-session-persistence.md)
+- **⚠️ 已废弃**：旧版 `Obsidian Vault/_hermes/评论会话/comment_<percent编码key>.json` 文件存储（2026-09-03 之前的实现）——gateway 重启 = 缓存清零 = 评论上下文全丢。`feishu-collab-health.py` 旧版读这个目录的代码已删除，新版改读 `state.db messages WHERE session_id LIKE 'comment-doc:%'`
+- **历史归档**：`Obsidian Vault/_hermes/评论会话/archive/` 下 23 个旧 JSON 文件保留**原文证据**，不删不导
+- 与聊天会话（state.db）完全隔离：不进聊天路由、不出现在桌面端**主**会话列表；只在「飞书评论」独立平台显示（侧边栏按 `source='comment'` 过滤）
 - 评论 agent：admin（妖玉）`skip_memory=False` 加载全局记忆；member `skip_memory=True` 隔离防泄露；`skip_context_files=True` 恒开（项目上下文走手动注入）
 
 ## 2026-08-06 协作接入改造（已实施）

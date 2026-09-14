@@ -19,6 +19,39 @@ if len(r.text) > 2000 and '<article' in r.text or '<main' in r.text:
 
 **触发条件：** URL 以 `.html`/`.md`/`.txt` 结尾，或 Content-Type 非 `text/html`。GitHub、MDN 等纯文档站适用。
 
+#### Tier 0-bis — Hermes 工具链全挂时的零依赖 fallback
+
+当 `web_extract` 和 `web_search` 都不可用（ddgs 后端未装、或 backend 不支持 extract、或返回 schema 不对），需要**纯 stdlib 拉一个 CDN/文档页 HTML** 时，用 `urllib.request` 直接打。`requests` 不一定在 venv 里。
+
+**gzip 解压陷阱：** 默认情况下 `urllib.request` 会按 `Content-Encoding` 自动解压，但少数 CDN（包括腾讯云 cloud.tencent.com）即使你**不**声明 `Accept-Encoding: gzip` 也会返回 gzip 字节流，自动解压遇到坏头会**静默把 gzip 字节当字符串**返回，看着像 base64 乱码但本质是未经解压的二进制。修法：手动 `Accept-Encoding: identity` 强制明文接收，或者拿到响应后 `gzip.decompress(r.read())`。
+
+```python
+import urllib.request, gzip, re
+req = urllib.request.Request(url, headers={
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Accept-Encoding": "identity",   # 关键：关掉自动 gzip 协商
+})
+r = urllib.request.urlopen(req, timeout=20)
+raw = r.read()
+if r.headers.get("Content-Encoding") == "gzip":
+    raw = gzip.decompress(raw)
+html = raw.decode("utf-8", errors="replace")
+
+# 提取可见正文
+body = re.sub(r"<script[\s\S]*?</script>|<style[\s\S]*?</style>", "", html, flags=re.I)
+text = re.sub(r"<[^>]+>", "\n", body)
+text = re.sub(r"\n\s*\n+", "\n", text).strip()
+```
+
+**自签证书应对：** 不要 `CERT_NONE` 全关校验——那是 MITM 漏洞。改成 `ssl.create_default_context()` 后 `ctx.load_verify_locations(cafile)` 加载站点 CA，或临时对单 host 走 `unverified_context`（仅限内网/已知 CDN），并加注释说明原因。
+
+**何时跳过 Tier 1/Tier 2：** 用户只要一个独立 HTML 文档（API 文档站、产品手册），不是 SPA 也不是登录态——直接 Tier 0-bis，不要启动浏览器实例。
+
+**调试信号：** 拿到的 `body` 里如果有大量 `\x00`/`\x1f` 控制字符 + 没有任何 `<` 字符 → 100% 是 gzip 没解压。看一眼响应头 `Content-Encoding` 确认。
+
 ### Tier 1 — Hermes CDP 浏览器（SPA/动态渲染，无登录态）
 
 ```

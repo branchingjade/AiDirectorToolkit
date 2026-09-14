@@ -1,8 +1,8 @@
 ---
 name: feishu-multi-user-collab
 description: "飞书多用户协作：会话路由、成员画像、推荐人选。触发词：多用户协作、成员画像、会话路由。派活由人在飞书直接 @，bot 不做任务中介。"
-version: 1.2.1
-tags: [feishu, 协作, 多用户, 路由, 画像, kanban]
+version: 1.3.1
+tags: [feishu, 协作, 多用户, 路由, 画像, kanban, 激励, bot-dm]
 ---
 
 # 飞书多用户协作工作流
@@ -13,13 +13,23 @@ tags: [feishu, 协作, 多用户, 路由, 画像, kanban]
 
 | 数据 | 路径 |
 |---|---|
-| 会话路由表 | `Obsidian Vault/_hermes/会话路由.json` |
-| 成员名单 | `Obsidian Vault/_hermes/成员名单.json` |
+| 会话路由表 | `Obsidian Vault/_hermes/会话路由.json` （**迁移中：候补 `viking://user/default/memories/entities/会话路由/`，见下注**）|
+| 成员名单 | `Obsidian Vault/_hermes/成员名单.json` （**候补 `viking://user/default/memories/entities/成员名单.md`**）|
 | 评论会话记忆 | `Obsidian Vault/_hermes/评论会话/<项目>:<open_id>.json`（2026-08-07 起迁入 vault，此前在 hermes home `comment_sessions/`，已迁移+清理） |
 | 项目记忆 | `Obsidian Vault/_hermes/项目记忆/<项目>.md`（2026-08-07 起 bot 实时沉淀——IM 消息管线 run.py 钩子 + 文档评论管线双通道写入，按日去重，每日≤5 条） |
 | 成员画像库 | `Obsidian Vault/成员画像/<真名>.md`（frontmatter 含 open_id/角色/专长/参与项目/updated/tags: [飞书协作, 成员画像]） |
 | 飞书协作记忆 MOC | `Obsidian Vault/_hermes/飞书协作记忆MOC.md`（图谱枢纽，`#飞书协作` tag 成组） |
 | 项目知识 | `Obsidian Vault/<项目名>/`（剧本/分场分析/复盘/自审报告） |
+
+> **OV 写盘契约 v1（2026-09-03 用户拍板）**——飞书侧写盘按 owner 路由到成员自己的 namespace，**不**统一写到 `default`：
+> - **default = 徐学环本人**（admin/owner 视角）。其他成员各自有独立的 user namespace（CY=苑津铭/YangXvan/QuanZhiYue/ChenXingYan/... 已在 admin 端注册），admin 凭据可读所有 user 子目录，但**写盘仍按 owner 区分**——他们的记忆不是 admin 的，admin 是可视的不是可越权的。
+> - 私有 / 个人偏好 / 个人事件走 `viking://user/<username>/<...>`（route key = `OPENVIKING_USER` env）
+> - 项目共享 / 跨成员可见走 `viking://resources/projects/<项目名>/`
+> - 仅真正公开广播的手册走 `viking://resources/_team-handbook/`
+> - **运行时切换**：`OPENVIKING_USER=<username>` 在写盘脚本里 export 后调 OV API；ADMIN 视角用 admin 凭据处理跨用户任务，但写盘侧仍按 owner
+> - **Obsidian `_hermes/` 边界**：在迁移过渡期保留为 git 归档层（已落地数据 + 历史快照），新数据默认往 OV 写；`feishu-daily-digest.py` / `feishu-collab-health.py` 仍读 Obsidian 直到实战确认完全迁移为止
+> - **判断口诀**：今天起的飞书事件 → 写 OV（按 owner namespace）；今天起的成员画像 → 写 OV；已存在的 Obsidian 沉淀 → 不动
+> - 完整端点/模式/陷阱见 `hermes-runtime-pitfalls` skill 的「飞书侧 OV 写盘契约 v1」节与 `references/feishu-ov-write-protocol.md`
 
 ## 1. 会话路由（判断当前会话属于哪个项目）
 
@@ -44,6 +54,7 @@ tags: [feishu, 协作, 多用户, 路由, 画像, kanban]
   - 观察到**明确**偏好/事实（沟通风格、偏好时段、专长、重要习惯）才写
   - 同一天同类观察合并为一条（去重），不设条数上限
   - 不确定的不写；写回更新 `updated` 字段
+  - **「擅长领域」vs「协作备注」边界**（2026-08-27 侯思羽实战）：画像模板规则「同一能力出现≥2次升级到擅长领域」指的是 **bot 多次观察沉淀**。**用户主动拍板的硬事实**（如「X 是正式成员，专攻美术+三维方向」）即使只发生一次，也属于 admin 决策，必须留档——但仍写「协作备注」，标 `(来源：admin 拍板)`，**不进擅长领域**（避免单次用户口径污染能力沉淀口径）
 - **妖玉可审**：`@bot 画像变更报告` → 列出最近沉淀；`@bot 王五的画像` → 展示指定画像
 - **应用**：回复前先看发送者画像（沟通风格/专长），个性化语气和内容；被问到"该让谁做"时按专长推荐人选，但派活由人在飞书直接 @
 
@@ -98,9 +109,95 @@ python3 ~/AppData/Local/hermes/scripts/feishu-collab-health.py [hours]  # 默认
 - DM chat_id 归属按 user_id 反查（state.db sessions 表），不能凭路由表已有登记猜
 - 新成员/新会话出现后，用健康脚本「路由未登记」列表补登记
 
+## 7. bot 主动 DM 工作流（激励 / 通知 / 确认）
+
+**触发场景**：admin 让 bot 「鼓励 X」「通知 X」「跟 X 说一声」——bot 必须主动向从未 DM 过的成员开口。
+
+**铁律**（2026-08-13 用户拍板）：
+- 永远 `--as bot`（Hermes 应用身份），**禁止 `--as user` 冒充 admin 本人**
+- 接收者是团队成员时，DM 内容**不空泛不煽情**——只认事实、不写「加油/辛苦了」
+
+### 7.1 发送流程（5 步）
+
+1. **找 open_id**：`Obsidian Vault/_hermes/成员名单.json` 里查；找不到先问 admin
+2. **看画像找锚点**：`成员画像/<真名>.md` 里至少 2 条具体事实/偏好/作品细节——激励文必须能引用这些具体锚点，否则不写（空泛激励 = 噪声）
+3. **写草稿 + dry-run**：
+   ```bash
+   lark-cli im +messages-send \
+     --as bot \
+     --user-id "ou_xxx" \
+     --text "<草稿>" \
+     --dry-run
+   ```
+4. **admin 拍板**：把草稿给 admin 看，确认后再发。**绝不未经确认直接发**——bot DM 是单向可撤回成本最高的通道
+5. **发送 + 回写路由表**：发出成功后，把 bot ↔ 该成员的新 P2P chat_id 写入 `会话路由.json`（`feishu:dm:<chat_id>`），不写则下次自动归类会断
+
+### 7.2 激励文写作 6 原则（2026-08-27 杨璇实战）
+
+| 原则 | 反例 | 正例 |
+|---|---|---|
+| **bot 身份明牌** | 「我替徐哥跟你说……」 | 开头就「bot 来挂一条……」 |
+| **具体事件锚点** | 「你的剧本写得真好」 | 「镜妖设定你定的"唯美/优雅/怪诞"三美感并列……」 |
+| **不空泛不煽情** | 「加油！辛苦了！」 | 一律删除"加油/辛苦/棒/赞"等空泛词 |
+| **纯中文** | 夹 internal 工作语言 | 8/19 杨璇立过规矩「说这么多英文干嘛」，混英文=踩雷 |
+| **拍板不催** | 「请尽快回复」 | 「拍板不催，回不回都行」——承认对方的节奏 |
+| **不掺私货** | 在交付方案 thread 里夹认可 | 激励必须单独发，不挂在工作交付 thread 上（干扰决策） |
+
+### 7.2.1 单句指令的铁律（2026-09-04 实测教训）
+
+admin 说「激励 X」「通知 Y」**单句指令**时，**bot 仍必须走 §7.1 完整 5 步流程——先把草稿给 admin 看，确认后再发**。**禁止**因为 admin 只丢一句话就直接发。
+
+- 错例：用户「激励杨璇」→ bot 直接发全文 → admin 后悔想撤回？没机会了，飞书 DM 无 bot 撤回 API（见 §7.4）
+- 正例：用户「激励杨璇」→ bot 走画像找锚点 → 写草稿 → **先在当前会话给用户看**（不是 DM 杨璇）→ 等用户拍板「发」→ 才走 lark-cli 发
+
+**判断口诀**：admin 让你「打给 Y」≠ 你已经获授权按下发送键。发送是单向可撤回成本最高的动作，**永远等拍板**。
+
+### 7.3 路由表回写模板
+
+bot 主动 DM 后，在 `会话路由.json` 的 `路由` 字段加：
+
+```json
+"feishu:dm:<新 chat_id>": {
+  "project": "<主战场项目>",
+  "space": "私聊",
+  "owner": "<真名>",
+  "note": "<YYYY-MM-DD> 由 bot 主动 DM 开通，<admin> 授权"
+}
+```
+
+`project` 字段按该成员主战场填（杨璇 → 伏妖记），不要填「协作」——DM 私聊不属于协作群。
+
+### 7.4 错误回退
+
+- 发送失败（`ok: false`）→ 把 chat_id 标 `pending`，**不要直接重试**——查 `data.chat_id` 是否回写，token 是否过期
+- 收到成员回「别发了/走开」类回复 → 立即停止后续推送，但**不删评论 thread**（admin 已确认 8/7 杨璇「走开」是玩笑非抗拒，thread 保留）
+- admin 撤回激励 → 不删已发消息（飞书 DM 无 bot 撤回 API），在画像协作备注标 `[YYYY-MM-DD]`「admin 撤回，原因：<X>」
+
 ## 验证清单
+
+### 成员首次登记（admin 拍板「X 是正式成员 / 方向 Y」时必走）
+
+- [ ] `_hermes/成员名单.json` 加条目（`name + role`，非 admin 一律 `member`）
+- [ ] `成员画像/<真名>.md` 已存在 → 加 `[YYYY-MM-DD]` 备注（admin 拍板的事实只写协作备注，**不进擅长领域**——见 §2 沉淀规则）
+- [ ] `成员画像/成员画像.md`（MOC 索引）补一行 + 更新日期
+- [ ] `_hermes/飞书协作记忆MOC.md` 人数描述同步（`N 人` → `N 人（含 <新成员>·<方向>，<日期> 加入）`）
+- [ ] 备份原文件 `.bak-<日期>` 后再改写
+
+> **典型坑**：漏 MOC 索引 + 漏协作 MOC 描述的人数。成员数 JSON 和 md 描述不一致，下游 health-check 会判异常。
+
+### 路由表维护
 
 - [ ] 新私聊首次消息 → 路由表新增条目
 - [ ] 已知群消息 → 不重复识别，直接用路由
+- [ ] bot 主动 DM 后 → 回写 `feishu:dm:<新 chat_id>` 到路由表（见 §7.3）
+- [ ] **任何写 `_hermes/*.json` 的操作前** → cp 一份 `.bak-<日期>` 再改
+
+### 画像沉淀
+
 - [ ] 成员偏好被沉淀 → 画像文件出现新条目（同类观察合并）
+- [ ] 同一能力观察 ≥2 次 → 升级进「擅长领域」；单次 admin 拍板 → 仅写协作备注
+- [ ] admin 主动撤回的事实 → 加 `[撤回]` 备注，**不删历史条目**
+
+### 任务协作（人在飞书，kanban 归 AI）
+
 - [ ] 成员要派活时，bot 引导直接 @ 具体人（不建任务）

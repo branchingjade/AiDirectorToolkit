@@ -230,3 +230,49 @@ session_id                        parent                          title         
 - 桌面渲染：apps/desktop/src/app/chat/sidebar/session-row.tsx:82 `sessionTitle(session)`；lib/chat-runtime.ts:64（title||preview||'Untitled'）
 - 侧边栏 messaging 分组：apps/desktop/src/app/chat/sidebar/index.tsx:890+
 - 详细端点/字段清单：references/session-data-apis.md
+
+## Hermes multi-channel interface 工作区（2026-08-26 巩固）
+
+> 从 MEMORY.md 迁出（Phase 6 精简）。
+
+### 核心目录
+
+Hermes 桌面 app + 飞书渠道通过 gateway 进程共享同一份**主工作区**：
+
+| 资源类型 | 路径（Windows） |
+|----------|------------------|
+| 主工作区根 | `C:\Users\HMSJ\Documents\Hermes` |
+| CLI plan 文档 | `~/AppData/Local/Hermes/plans/` |
+| Kanban boards | `~/AppData/Local/hermes/kanban/boards/` |
+| Skills | `~/AppData/Local/hermes/skills/` |
+| Plugins | `~/AppData/Local/hermes/plugins/` |
+| Sessions DB | `~/AppData/Local/hermes/sessions/state.db` |
+| 记忆 | `~/AppData/Local/hermes/memories/MEMORY.md` |
+| Hindsight（已停）| `~/AppData/Local/hermes/hindsight/` |
+| TDB 配置 | `~/AppData/Local/hermes/memories/.archive/...` 或 .env |
+
+### 渠道共享机制
+
+- **bot** 通过 gateway 进程访问 skills/plugins/kanban/plans/sessions 全部资源
+- **桌面 app** 通过 9120 dashboard + 8644 gateway 访问同一份资源
+- **CLI / API server** 直接读 `~/.hermes/` 目录（8642 端口）
+
+### 重装/迁移要点
+
+`~/.hermes/`（即 `C:\Users\HMSJ\AppData\Local\hermes\`）是**全渠道共享根目录**。重装或迁移 Hermes 后：
+
+- 桌面 app / 飞书 bot / CLI 全部共享同一份 `~/.hermes/`
+- 无需每个渠道单独配置（除非有平台特定的 app_id/secret）
+- 会话历史、记忆、插件状态、计划任务都跟着目录走
+
+### 关键点
+
+1. **不要在多个地方备份同一份配置**——一份 `.env` 足矣（`LOCALAPPDATA/hermes/.env`）
+2. **gateway 进程是单入口**——所有渠道 agent 调用都通过 8644
+3. **dashboard 进程（9120）独立**——仅服务桌面 UI，不影响后台 agent
+
+### 与 DSH 的关系（已归档）
+
+DSH（DeepSeek Harness）作为执行引擎时，**通过 dsh_bridge.py 与本工作区解耦**（不读 ~/.hermes/，直接通过 HTTP API 调 DSH web）。DSH 会话独立管理在 `~/.dsh/`。
+
+⚠️ **2026-08-27 起 DSH 已归档**——scripts/Projects 全部移到 `*_archive/dsh-2026-08-27/`，进程停止，计划任务 Disabled。TDB v3 是当前唯一记忆后端。

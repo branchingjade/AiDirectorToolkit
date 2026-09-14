@@ -14,17 +14,24 @@ DeepSeek 官方 agent 框架（2025-07-31 与 V4 Flash 同天发布，MIT，基�
 - ⚠️ 默认端口 3080 起不来：Windows Hyper-V/WSL 把 3001-3100 划进排除端口段
   （`netsh interface ipv4 show excludedportrange` 可查）→ 用 8080
 
-## 部署产物（2026-08-14）
+## 部署产物（2026-08-14 → 2026-08-20 升级）
 | 项 | 位置 |
 |---|---|
-| watchdog 脚本 | `Projects/deepseek-harness/dsh_watchdog.py`（纯血：系统 node + 系统 Python312，零 Hermes 引用） |
+| **watchdog 脚本** | **`Documents/Hermes/scripts/dsh_watchdog.py`**（2026-08-20 迁移到 Hermes 工作区 git 管理；旧版 `Projects/deepseek-harness/dsh_watchdog.py` 在 8-18 清理时丢失） |
 | 计划任务 | `DSH_Watchdog`（每 5 分钟，系统 pythonw 运行，跑完即退） |
-| 服务日志 | `Projects/deepseek-harness/logs/dsh.log` |
-| 看门狗日志 | `Projects/deepseek-harness/logs/dsh_watchdog.log` |
-| 状态/冷却 | `Projects/deepseek-harness/dsh_watchdog_state.json` |
+| watchdog 日志 | `Documents/Hermes/.hermes/dsh_watchdog.log` |
+| watchdog state | `Documents/Hermes/.hermes/dsh_watchdog_state.json`（含 `last_pid` / `last_pid_started_at`）|
 
-## 本实例踩坑（2026-08-14 实测）
-1. **后台进程随会话死**：Hermes terminal(background=true) 起的服务，会话结束进程即亡——这是最初「DSH 挂了」的根因（不是崩溃）
+**2026-08-20 三件套升级**（commit `515f726`）：
+1. **健康检查 TCP-only → HTTP + 命令行校验**：curl `/` HTTP 200 + `Get-CimInstance` 找带 `--max-old-space-size=8192` + `apps/cli/src/bin.ts` + `web` + `--port 8080` 四段子串的 node.exe。堵三盲区（端口被抢 / boot 失败但 listen / 半开）
+2. **冷却反模式 → PID 存活追踪**：state 新增 `last_pid` + `last_pid_started_at`，冷却期内但 PID 已死 → 立即拉起；存活 ≥ 5 分钟 → 重置 `last_restart_at` 为 null
+3. **CLI 参数**：`--status`（打印健康+状态）/ `--force`（跳冷却立即拉起）
+
+## 历史残留清理（2026-08-20）
+`Projects/deepseek-harness/dsh_watchdog_state.json` + `Projects/deepseek-harness/logs/` 是 8-18 清理前的旧 watchdog 状态文件——脚本已删但文件残留。最后一条记录带 `reason: "preview-url-restart-request"`，DSH 自审证实是桌面 preview pane 会话 `preview_9bed48` 在 00:15:50.959 经 terminal 工具的临时写者补写的虚构 reason（DSH 无任何接受 reason 的 restart RPC，preview 写者也无法定位）。仓库根 `.gitignore` 已加 `dsh_watchdog_state.json` + `logs/` 屏蔽。
+
+## 本实例踩坑
+1. **后台进程随会话死**：Hermes terminal(background=true) 起的服务，会话结束进程即亡——这是最初「DSH 挂了」的根因（不是崩溃）。**已修复**：watchdog 通过计划任务拉起，进程祖先是 svchost 不再依赖 Hermes 桌面（2026-08-20 DSH 解耦验证实测：PID 5396 是孤儿，父进程查不到）
 2. **pnpm 包装进程被杀，node 子进程成孤儿**：kill pnpm 父进程后 8080 仍 LISTEN（新 PID），需按端口再杀
 3. **验证进程归属**：`powershell -NoProfile -Command "(Get-Process -Id PID).Path"` 确认是 `C:\Program Files\nodejs\node.exe`（纯血达成）
 

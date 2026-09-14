@@ -60,32 +60,55 @@ def route_and_notify(sid, frame):
 - 飞书渠道派活 → 渠道入口没在 `run` 命令后追加 `--source feishu --owner <open_id>`
 - DSH web UI 直发起 → 也没触发桥 CLI 注册
 
-## 修复路径（A vs B）
+## 修复路径（C 已选定——2026-08-20 用户拍板）
 
-### A 最小修复——监听器兜底更聪明
+### A 最小修复——监听器兜底更聪明 [否]
 
 只动 `dsh_mux_listener.py` 的兜底分支。问题：cwd=Documents/Hermes 时被判定桌面，桌面
-只留痕不推送——但用户从飞书看到了，说明判定失效。需先看 `.hermes/dsh-mux-listener.log`
-确认两条 hermes-fe1ffa2f / hermes-7956064e 实际走的是哪条分支、对照推送结果。
+只留痕不推送——但用户从飞书看到了，说明判定失效。**用户结论：cwd 不可靠，砍掉 cwd 判定**。
 
-### B 完整修复——所有渠道入口带 source/owner
+### B 完整修复——所有渠道入口带 source/owner [否]
 
 | 渠道入口 | 调桥时必须追加 | 写入注册表 |
 |---|---|---|
 | 桌面 / Web 直发起 | `--source desktop` | `source=desktop`，无 owner（妖玉本机） |
 | 飞书 channel hub 派活 | `--source feishu --owner <发起人 open_id>` | `source=feishu`，`owner=ou_xxx` |
 | Cron 触发 | `--source cron` | `source=cron`（cron 不提问，路由表无此分支） |
-| DSH web UI 直发起 | （产品决策）是否算桌面？还是新加 `source=web`？ | 待用户拍板 |
+| DSH web UI 直发起 | **用户拍板：归 desktop 类，不需要回流** | 不登记 source/owner，走「未登记 → 默认留痕」 |
 
-**修复后预期**：每条新 session 的 `session.source` 都非空 → 监听器走精确分支，不再堆妖玉 DM。
+**用户否定 B 的关键论据**：「DSH web UI 直起的 session 跟 Hermes 桌面端一样，不需要回流飞书」。
+→ B 路径全表回填 source 的复杂度没价值。
 
-## 实操清单（用户决策前可执行的探测）
+### C 选定——砍兜底 cwd 判定、默认桌面留痕（commit `2630cfc`）
 
-1. **看 mux listener 实际日志**（关键，决定走 A 还是 B）：
+把兜底分支从「cwd 判定」改成「未登记 session 默认桌面留痕，不推送」：
+
+```python
+# 旧（174-215）：
+if cwd and ("Documents/Hermes" in cwd.replace("\\", "/") or "Obsidian" in cwd):
+    ...留痕
+ok = feishu_send(FEISHU_BOT_DM, msg)  # 堆妖玉 DM
+
+# 新：
+# 未登记会话（DSH web UI 直起 / 旧会话）→ 默认桌面留痕，不推送
+log(f"[路由] 未登记会话 → 默认桌面留痕")
+_mark_pending(sid, frame, text, options, target="desktop", source="unknown")
+return True
+```
+
+**4 case 单测全过**（feishu+owner / feishu / desktop / 未登记），真实 mux 帧实测：
+`hermes-84d606e3 (2026-08-20 10:04:36) → [路由] 未登记会话 → 默认桌面留痕` ✅
+
+**遗留上游保险**（未做）：若飞书渠道起的 session 桥忘传 source，应该在 `dsh_bridge.py:934` CLI
+入口加硬性 warn（cwd 是飞书相关路径但 source 空时退出报错），不该让监听器靠 cwd 猜。
+
+## 实操清单
+
+1. **看 mux listener 实际日志**（决定走哪条路径的关键证据）：
    ```bash
    tail -50 "$HERMES_HOME/.hermes/dsh-mux-listener.log"
    ```
-   重点看这两条 hermes-fe1ffa2f / hermes-7956064e 是不是被打了「无 source」标记。
+   重点看两条 hermes-fe1ffa2f / hermes-7956064e 是不是被打了「无 source」标记。
 
 2. **统计全表 source 缺失比**（诊断整体）：
    ```python
@@ -97,8 +120,14 @@ def route_and_notify(sid, frame):
    # 输出 121/121 时 = 路由机制全表退化（本次确认）
    ```
 
-3. **回填验证**（如选 B）：手改 1-2 条测试 session 临时加 `source=desktop` 字段，看
-   `find_session` 是否能命中——验证逻辑链路通后，再正式改所有调用方。
+3. **修复后查 zombie listener**（commit 后立即验证）：
+   ```powershell
+   Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" |
+     Where-Object {$_.CommandLine -like '*dsh_mux_listener*'} |
+     Select-Object ProcessId, CreationDate
+   ```
+   看 CreationDate 是 commit 时间之前（zombie）还是之后（新进程）。zombie 则 `Stop-Process -Id <PID> -Force`。
+   详见 `references/dsh-mux-listener-zombie-pitfall.md`。
 
 ## 经验教训（写进 SKILL.md 的坑 21）
 
@@ -108,11 +137,16 @@ def route_and_notify(sid, frame):
 3. **兜底分支要带告警**：当前兜底只 `log()` 没告警，121 条全走兜底也没人发现。
    修复时应同时给兜底分支加「高频兜底=异常」告警（飞书推一次「DSH 反向通道疑似
    退化，source 字段全空」到开工群）。
+4. **commit 后必查 zombie**：长驻进程不会自动 reload 代码，`--once` + `check_alive()`
+   组合只检查进程存在性不看代码版本——commit 后进程 StartTime 早于 commit 时间
+   = zombie，行为仍按旧代码走（坑 22）。
 
 ## 关联
 
-- SKILL.md 坑 21（待补）
+- SKILL.md 坑 21（v3 全表退化）+ 坑 22（zombie listener）
 - `scripts/dsh_mux_listener.py`（监听器本体）
 - `scripts/dsh_bridge.py` 行 243-261 / 435 / 926-931（协议层源头）
 - `.hermes/dsh-registry.json`（注册表，121 条全表无 source）
-- 提交 d997158（反向通道 v3 落地，协议正确但未贯通到调用方）
+- 提交 d997158（反向通道 v3 落地）
+- 提交 2630cfc（路径 C：未登记默认留痕，砍 cwd 兜底）
+- `references/dsh-mux-listener-zombie-pitfall.md`（zombie 进程问题详解）

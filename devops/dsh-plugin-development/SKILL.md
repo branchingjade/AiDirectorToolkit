@@ -2,12 +2,16 @@
 name: dsh-plugin-development
 description: 开发、维护、分发和验证 DeepSeek Harness (DSH) 插件的执行型 Skill。覆盖 host/client 形态判断、bundle/profile 契约、Service 与函数插件、工具、HTTP、持久化、slot、Conversation Node、客户端构建、HMR、GitHub 安装和真实组合验证。
 metadata:
-  version: "3.1.0"
+  version: "3.1.1"
   date: "2026-08-13"
   reference: "https://github.com/NanmiCoder/dsh-agent-teams"
+  changelog:
+    - "3.1.1 (2026-08-27): ⚠️ DSH 已归档（scripts/Projects 全部移到 `*_archive/dsh-2026-08-27/`，进程停止）。本 skill 保留供考古，**不要按本 skill 的 DSH 插件开发方案实施**——当前不开发新 DSH 插件。"
 ---
 
 # DSH 插件开发
+
+> ⚠️ **SUPERSEDED (2026-08-27)**: DSH 已归档——scripts/Projects 全部移到 `*_archive/dsh-2026-08-27/`，进程停止。本 skill 保留供考古方法论参考，**不要按本 skill 的开发流程实施新 DSH 插件**。
 
 这是正式版导向的执行清单。先判断运行面，再选择官方模板，实现后必须从真实组合和用户安装路径验证。不要把某个项目的偶然实现当成框架契约。
 

@@ -30,6 +30,24 @@ lark-cli is a lightweight supplementary tool used ONLY when you need to operate 
 
 See `references/lark-cli-token-management.md` for token lifetimes, auto-refresh behavior, and required OAuth scopes.
 
+## Memory Provider 对 Feishu Adapter 透明（必知事实，2026-09-03 OpenViking 切换验证）
+
+**核心铁律**：Feishu adapter 对记忆后端是**完全透明的**——切换 provider（Hindsight↔OpenViking↔其他）**不需要修改任何 Feishu 插件代码**。
+
+**机制（grep 验证）**：
+- `plugins/platforms/feishu/adapter.py` 全文 **0 处**直接调 `hindsight`/`openviking`/`retain`/`recall`
+- memory provider 通过 `memory.provider` (config.yaml:398-406) 配置，gateway 进程**统一加载**——所有 agent 实例（桌面/CLI/Feishu/Cron）自动挂载同一 provider
+- 配置切换：`hermes config set memory.provider <openviking|hindsight|...>` —— 然后重启 gateway 即可
+
+**坑点（实测）**：
+- **配置切换 ≠ 立即生效**：provider 实例化发生在 agent 启动时，`memory.provider` 改了必须重启 gateway——cron/桌面/flying 三端**统一重启一次**即可（不需要逐端重启）
+- **Provider 挂了 ≠ Feishu 挂了**：provider 是 recall 增强层（不是必需），provider 鉴权失败时 AIAgent 仍跑，但 `recall` 工具报错——表现是 Feishu 回复不带历史偏好，不是不回消息
+- **换 provider 需要重做 ②→⑤ 整体记忆**：用户偏好/项目事实不会自动迁移（Hindsight→OpenViking 需手动 retain）——这是**用户内容**问题不是**架构**问题
+
+**反向教训**：「换 provider 要改 Feishu 代码吗？」**永远不要**。grep 不到 adapter.py 里任何 provider 引用 = 答案永远是「不需要」。
+
+参考：`hermes-workspace-conventions` skill 中「OpenViking 双 URI 位置陷阱」pitfall + `hindsight-ops-diagnostics.md`「飞书→Hindsight 链路天生打通」节。
+
 ## Document Operations
 
 lark-cli can read and export Feishu documents without needing a browser login — use this when the user asks about content in their Feishu docs.
@@ -191,6 +209,30 @@ For per-channel prompts:
 hermes config set platforms.feishu.channel_prompts.oc_CHAT_ID "始终使用中文回复，简洁直接。"
 ```
 
+### ⚠️ `group_policy: open` ≠ 群消息自动放行（实测 2026-09-03，三个机制必须分清）
+
+`platforms.feishu.group_policy: open` 走的是 `adapter.py:_allow_group_message()` 的 policy 校验——但**还**有两道独立的拦截在前面：
+
+1. **`require_mention: true`（默认）→ 没 @ bot 一律拒**：哪怕 group_policy=open，消息没 @bot 就在 `adapter.py:4521` 走 `group_policy_rejected` 分支。**全群 17 天停摆的开工群就是这个原因**——用户在群里讨论从来不会 @bot，每条都被吞。
+2. **`group_rules` 没显式登记 → 走默认（`require_mention=true`）**：每个群必须**显式**在 `group_rules` 登记 require_mention（true 或 false），没登记的群**走全局默认**。要"群内不 @ 也响应"必须**逐群**设 false。
+3. **不活跃的群不要随便开 require_mention=false**——只对**已确认协作活跃**的群开，否则可能被无关消息骚扰。
+
+**实战根因链（开工群 17 天停摆 2026-09-03 排查）**：
+- 用户在群 oc_685820a... 发消息，`mentions=[]`（没 @bot）
+- 命中 `adapter.py:4521` `group_policy_rejected` 拒绝
+- `group_rules` 里**没有**这个 chat_id → 走默认 `require_mention=true`
+- gateway.log 出现 `ADMIT REJECTED: reason=group_policy_rejected chat_id=oc_685820a...`
+
+**修复模板（三个核心群）**：
+```bash
+hermes config set platforms.feishu.group_rules.oc_685820a739882df67954e0923ec9ab73.require_mention false --force  # 开工群
+hermes config set platforms.feishu.group_rules.oc_b7396f845a84a3aebdb1bf38c872e37a.require_mention false --force  # 伏妖记协作群
+```
+
+**自动化检测**：`scripts/feishu-collab-health.py` 已加 `group_whitelist_coverage()`——从 `state.db sessions` 查所有历史活跃的群 chat_id，**没**在 `group_rules` 显式登记的会报警。每次跑健康检查自动触发，跑完看【5b】节。
+
+**为什么 `group_policy: open` 这个名字误导人**：policy 字段管的是"消息能否进入 agent 流水线"（allowlist/blacklist/admin_only/open/disabled），而 require_mention 管的是"消息需不需要 @bot"——两件事正交。open 只代表"任何成员都能向 bot 发消息"，**不代表"任何消息都触发回复"**。`config.yaml` 字段命名无法一眼看清，**理解配置时必须分两个维度读**。
+
 ### Why `free_response_channels` doesn't work on Feishu
 
 The Feishu platform adapter reads its per-group rules from `extra.get("group_rules")`, not from `free_response_channels`. The `free_response_channels` value **is** bridged to the platform config (gateway/config.py line 1207-1208) but is never processed into group rules by the feishu adapter (zero references to `free_response_channels` in adapter.py). This is different from Discord/Slack where `free_response_channels` is explicitly handled.
@@ -296,6 +338,77 @@ If the Feishu bot is added to group chats or open to DMs from multiple users, **
 5. **Separate profile** — `hermes profile create feishu-bot --clone-from default --clone`. Complete isolation.
 
 Full breakdown of all strategies: `references/multi-user-memory-isolation.md`
+
+## Chat DM 配对 / 用户白名单机制（实测 2026-09-02）
+
+飞书 P2P 私聊（DM）走的是 `FEISHU_ALLOWED_USERS` 环境变量白名单机制——与文档评论通道（`feishu_comment_pairing.json` / `feishu_comment_rules.json`）**完全独立**，是两套不同的名单。本次 9/02 多用户「进行不了会话」的根因就在这里。
+
+### 症状特征
+
+`gateway.log` 里反复出现同一条 warn：
+```
+WARNING gateway.run: Unauthorized user: ou_<32hex> (<名字|用户+N>) on feishu
+```
+其中 `(<名字>)` 是 adapter 曾经反查过一次缓存的真名；如果没缓存/无通讯录权限则显示 `用户+N`（即脱敏名）。
+
+bot 会照常接收消息（`Inbound dm message received`），但不会触发任何 agent 回复，飞书端表现为「@了 bot 一直不回」。
+
+### 根因链路（adapter.py:1616 / :4401 / :5824-5837）
+
+1. `os.getenv("FEISHU_ALLOWED_USERS", "")` 在启动时**一次性**读到内存，缺失/为空 → 默认 pairing 模式
+2. 未配置时启动必打 warn：`No env user allowlists configured. Messaging platforms default to pairing/allowlist policies and will deny unknown senders ...`
+3. 配对名单有两套：
+   - **聊天 DM 通道**：`FEISHU_ALLOWED_USERS`（env 字符串，逗号分隔）—— adapter.py:1616 `for item in os.getenv(...).split(",")`
+   - **文档评论通道**：`feishu_comment_pairing.json`（JSON 文件，mtime 热加载）—— 详见 hermes-feishu-internals §2
+4. `.env` 与 `config.yaml` 都不接受 chat DM 白名单 schema——只能写 `.env`
+
+### 完整修复流程（批量开多人 + 重启验证）
+
+```bash
+# 1) 收集想放行的 open_id 列表（gateway 日志、Obsidian 成员名单.json、state.db sessions.user_id 任一来源）
+#    adapter 没有"按租户通讯录批量拉"的内部 API，bot 身份也无此权限——必须人工事先列
+ids="ou_abc...,ou_def...,ou_ghi..."
+
+# 2) 备份当前 .env
+cp ~/.hermes/.env ~/.hermes/.env.bak-$(date +%F)
+
+# 3) 写入 FEISHU_ALLOWED_USERS（Python 路径，因为 .env 受 write_file 保护，且精确替换已有行）
+python3 <<PYEOF
+import re
+p = r"C:/Users/HMSJ/AppData/Local/hermes/.env"
+src = open(p, encoding='utf-8').read()
+new = f"FEISHU_ALLOWED_USERS={ids}\n"
+src = re.sub(r'^FEISHU_ALLOWED_USERS=.*$', new.rstrip(), src, flags=re.MULTILINE) \
+        if re.search(r'^FEISHU_ALLOWED_USERS=', src, re.MULTILINE) \
+        else src.rstrip() + "\n\n# <日期> user 拍板: <备注>\n" + new
+open(p,'w',encoding='utf-8').write(src)
+PYEOF
+
+# 4) chat DM 与 comment pairing 是两套名单——想评论也能回复就同步写
+#    CLI: ~/AppData/Local/hermes/hermes-agent/venv/Scripts/python.exe -m plugins.platforms.feishu.feishu_comment_rules pairing add <open_id>
+
+# 5) 重启 gateway（FEISHU_ALLOWED_USERS 是启动时一次读 env，不热加载）
+hermes gateway restart
+```
+
+### 部署后验证（必走的两步）
+
+1. **process 级别验证**：`grep "No env user allowlists configured" gateway.log | tail -1`，**应不再出现最新**那次启动记录
+   - 旧记录无害（每次启动前打的，重启后打不到了 = 成功）
+   - 新启动后还出现 = env 没读到，重启失败或 .env 写错
+2. **端到端验证**：让名单内一个之前被拒的 open_id 主动 DM 一下 bot，看日志是否出 `response ready`（不再 `Unauthorized user`）
+
+### 与 comment pairing 的边界
+
+| 行为 | chat DM | 文档评论 |
+|---|---|---|
+| 配置入口 | `FEISHU_ALLOWED_USERS` env（`.env`） | `feishu_comment_pairing.json` 或 `feishu_comment_rules.json` |
+| 是否热加载 | ❌（重启 gateway） | ✅（mtime 热） |
+| 默认策略 | 未设 = pairing 拒 | 未设 = pairing 拒 |
+| 写入 CLI | 无（必须手动写 .env） | `feishu_comment_rules pairing add <open_id>` |
+| bot 向用户发 DM | 不受白名单限制（出站） | 受 |
+
+⚠️ 单方向不对称：bot→user 不被 `FEISHU_ALLOWED_USERS` 卡，user→bot 才卡——所以 `lark-cli im +messages-send --as bot --user-id ou_xxx` 永远能跑通，不能用它作为白名单生效的验证手段。
 
 ## Pitfalls
 

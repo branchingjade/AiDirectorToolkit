@@ -46,9 +46,11 @@ con.execute("SELECT host_key, name, value FROM cookies").fetchall()  # logged_in
 |--------|------|------|
 | "帮我打开xx看看"/"截图" | 层1：agent-browser | browser_navigate/click/snapshot |
 | "后台爬"/"批量抓"/"数据" | 层2：CDP 无头 | 后台自动化，用户无感 |
-| "用我浏览器"/"我登录的"/"操作已登录网站" | 层3：Kimi WebBridge | 继承用户登录态 |
+| "用我浏览器"/"我登录的"/"操作已登录网站" | 层3：Kimi WebBridge（Python SDK）| 继承用户登录态 |
 
 **选层规则：** 用户没指定时默认 agent-browser → CDP失败自动切 WebBridge → 不纠结。
+
+**"agent 能自己判断使用"铁律**（2026-09-08 用户拍板）：agent 不要每次现场拼 curl + JSON + temp 文件——见下面「层3：Kimi WebBridge」章节，**直接用 `kimi_webbridge` Python SDK**（`KimiWebBridge` 类 + 13 个方法），agent 通过 `execute_code` 调。SDK + CLI 共用 `kimi_webbridge/_transport.py`，行为一致。CLI 是给用户手跑用的，不要把 CLI 模式当成 agent 工具。
 
 ---
 
@@ -155,69 +157,138 @@ agent-browser snapshot --cdp 9222 --json          # 抓取（JSON 中 .data.snap
 
 ---
 
-## 层3：Kimi WebBridge
+## 层3：Kimi WebBridge（官方 daemon + Python SDK）
 
 通过守护进程（`localhost:10086`）控制用户真实 Chrome，保留所有网站登录态。
 
 ### 架构
 
 ```
-Agent → HTTP API (localhost:10086) → 守护进程 → CDP → Chrome 扩展 → 用户真实 Chrome
+Agent → execute_code + kimi_webbridge SDK → HTTP API (localhost:10086)
+                                                  ↓
+                                              daemon → Chrome 扩展 → 用户真实 Chrome
 ```
+
+**安装命令**（PowerShell）：`irm https://cdn.kimi.com/webbridge/install.ps1 | iex`
+**当前版本**：daemon v2.0.5 + 浏览器扩展 v2.0.1（扩展 id `bnlffdbcfnanfbknnlaflhlhkocccckg`）
+**安装位置**：`%USERPROFILE%\.kimi-webbridge\bin\`
 
 ### 状态检查
 
 ```bash
 ~/.kimi-webbridge/bin/kimi-webbridge.exe status
+# 或裸命令：kimi-webbridge status（新 shell 自动可见，已注册 HKCU\Environment）
 ```
 
-### 调用方式：execute_code（推荐）
+### 调用方式（2026-09-08 用户拍板：SDK 优先）
+
+#### 方式 A：**Python SDK（agent 首选）**——`kimi_webbridge/`
+
+**位置**：`<workspace>/kimi_webbridge/`（如 `C:\Users\HMSJ\Documents\Hermes\kimi_webbridge\`）。两个文件：
+
+- `__init__.py`：`KimiWebBridge` 类（13 个方法）+ `list_tabs / is_daemon_alive / wait_daemon` 模块函数
+- `_transport.py`：HTTP 通信 + daemon lazy 启动 + curl.exe + 临时文件（CLI 与 SDK 共用底层）
+
+**agent 用 `execute_code` 调用范式**：
 
 ```python
-import json, subprocess, os
+import sys
+sys.path.insert(0, "/c/Users/HMSJ/Documents/Hermes")  # 一次性，加 sys.path
+from kimi_webbridge import KimiWebBridge
 
-payload = {
-    "action": "navigate",
-    "args": {"url": "https://example.com", "newTab": True, "group_title": "任务名"},
-    "session": "my-task"
-}
-
-tmpfile = os.path.join(os.environ["TEMP"], f"wb-req-{os.urandom(4).hex()}.json")
-with open(tmpfile, "w", encoding="utf-8") as f:
-    json.dump(payload, f, ensure_ascii=False)
-
-result = subprocess.run(
-    ["curl.exe", "-s", "-X", "POST", "http://127.0.0.1:10086/command",
-     "-H", "Content-Type: application/json", "--data-binary", f"@{tmpfile}"],
-    capture_output=True, text=True, timeout=30
-)
-os.remove(tmpfile)
-print(result.stdout)
+kw = KimiWebBridge(session="douban-crawl", group_title="豆瓣爬取")
+kw.navigate("https://www.douban.com/")             # 打开 tab
+tree = kw.snapshot()                                # 拿 a11y 树（带 @e 引用）
+kw.click("@e5")                                     # 点击元素
+kw.fill("@e12", "搜索内容")                          # 填输入框
+kw.fill("@e15", "密码", submit=True)                # 提交表单（dispatch Enter）
+path = kw.screenshot(path="/tmp/page.png")           # 截图
+kw.close_session()                                  # 清理整组
 ```
 
-**为什么文件体模式：** 中文经 shell 管道到 daemon 会乱码。Python `json.dump` 写 UTF-8 文件再 `--data-binary`，彻底绕过。
+**SDK 行为保证**：
 
-### 工具速查
+- **Lazy daemon**：第一次调用 `navigate/snapshot/etc.` 时 `ensure_daemon()` 自动检查 + 拉起，不需要手动 `start`
+- **Session 隔离**：每个 `KimiWebBridge` 实例对应一个 daemon session（=一个 tab group），实例之间互不干扰
+- **`_data()` 容错**：daemon 各 action 返回结构不统一——`snapshot / save_as_pdf / list_tabs` 的 `data` 不含 `success` 字段（直接是内容），`navigate / click / fill` 含 `success`。**SDK 按 `ok=true` 判成功 + `data.success=false` 才报错**，两种结构都覆盖
+- **`group_title` 只发一次**：首次 `navigate` 带 group_title 创建 tab group，后续 navigate 不再发（避免覆盖）
 
-| 工具 | 核心参数 | 说明 |
-|------|---------|------|
-| `navigate` | `url`, `newTab`, `group_title` | 打开页面 |
-| `find_tab` | `url`, `active` | 切换到已有标签 |
-| `snapshot` | — | 可访问性树 |
-| `click` | `selector` | 合成点击 |
-| `fill` | `selector`, `value` | 填表 |
-| `evaluate` | `code` | 执行 JS |
-| `screenshot` | `format`, `quality`, `selector` | 截图 |
-| `list_tabs` | — | 列出所有标签 |
-| `close_session` | — | 关闭任务所有标签 |
+#### 方式 B：CLI（用户手跑用）
+
+`scripts/kimi_webbridge.py` 是 SDK 底层的 CLI 形态——**不要把 CLI 当 agent 工具**。CLI 复用同一份 `_transport.py`，行为与 SDK 一致。
+
+```bash
+kimiwb diagnose                          # 四步自检
+kimiwb restart                           # 拉起 daemon
+kimiwb exec --action navigate --args '{"url":"https://example.com","newTab":true}' --session my-task
+```
+
+裸命令 `kimi-webbridge` 与 `kimiwb` 已注册 Windows 用户 PATH（新 shell 立即可见；当前 shell 不刷新）。
+
+### 13 个 SDK 方法速查（覆盖 skill 描述的全部 daemon action）
+
+| 方法 | daemon action | 说明 |
+|------|---------------|------|
+| `navigate(url, *, new_tab=True)` | `navigate` | 打开 URL，首次带 group_title 建 tab group，返回 `{tabId, url}` |
+| `close_tab()` | `close_tab` | 关闭当前 tab |
+| `close_session()` | `close_session` | 关闭整个 session 的全部 tab |
+| `snapshot()` | `snapshot` | 拿 a11y 树（含 @e 引用 + url + title + tree） |
+| `list_tabs()` | `list_tabs` | 列当前 session 的 tab |
+| `find_tab(url, *, active=False)` | `find_tab` | 找 tab；`active=True` 借用用户当前查看的 tab |
+| `click(selector)` | `click` | 点击元素（@eN 引用或 CSS 选择器） |
+| `fill(selector, value, *, submit=False)` | `fill` | 填输入框；`submit=True` 追加 Enter |
+| `press(key)` | `evaluate` | 派发特殊键（Escape 等） |
+| `screenshot(*, format, quality, selector, path)` | `screenshot` | 截图（返回文件路径，不返回 base64） |
+| `save_as_pdf(*, paper_format, landscape, scale, print_background, path)` | `save_as_pdf` | 保存为 PDF |
+| `evaluate(code)` | `evaluate` | 跑 JS（支持 async/await，IIFE 包裹避免 const 冲突） |
+| `cdp(method, params=None)` | `cdp` | raw CDP escape hatch |
+| `network_list(filter=None)` | `network` | 列网络请求 |
+| `upload(selector, files)` | `upload` | 上传本地文件到 file input |
 
 ### Session 和标签管理
 
 **一个任务 = 一个 session = 一个标签组。** 任务全程用同一个 session 名。
 
-```json
-{"action":"navigate","args":{"url":"https://example.com","newTab":true,"group_title":"任务中文名"},"session":"task-name"}
+```python
+# 创建任务实例
+kw = KimiWebBridge(session="task-name", group_title="任务中文名")
+# 所有方法自动带 session 名，无需手动传
 ```
+
+**两个任务的 tab 互不干扰**——`KimiWebBridge(session="A")` 和 `KimiWebBridge(session="B")` 在浏览器侧是两组 tab group。
+
+### 已知的 daemon 返回结构不统一问题
+
+| Action | 返回 `data` 结构 | 有 `success` 字段？ |
+|--------|------------------|-------------------|
+| `navigate` | `{success, url, tabId}` | ✅ |
+| `click` / `fill` | `{success, tag, text}` | ✅ |
+| `list_tabs` | `{success, tabs: [...]}` | ✅ |
+| `snapshot` | `{url, title, tree: [...]}` | ❌（直接是内容） |
+| `save_as_pdf` | `{path, sizeBytes, mimeType, pageTitle}` | ❌ |
+| `screenshot` | `{format, path, sizeBytes, mimeType}` | ❌ |
+| `evaluate` | `{type, value}` | ❌ |
+| `find_tab` | `{success, url, tabId, borrowed}` | ✅ |
+
+**SDK 的 `_data()` 已统一处理**：按 `ok=true` 判成功 + `data.success=false` 才报错（缺字段视为无错）。**不要自己写 `_data()` 逻辑**——这是已知坑，多人踩过。
+
+### Windows 调用规范（关键陷阱，与 SDK 一致）
+
+- daemon 端口 `10086`，**唯一 API 是 `/command`**（`/` 和 `/health` 都是 404）—— 不要写健康探测代码用 GET `/`
+- **必须用 `curl.exe`**（PS 别名 `curl` = `Invoke-WebRequest`，会破坏 body 中文）
+- **每个请求独立随机 temp 文件** + 即删——避免并发互相覆盖
+- 用 `--data-binary @<file>`（`--data` 会改编码）
+- 跨线程 `threading.local()` 跨 DaemonThreadPoolExecutor 会查不到 client（详见 hermes-runtime-pitfalls「feishu_doc/drive tool 跨线程 client 查找陷阱」）；Kimi WebBridge SDK 通过 `_transport.send_command` + 临时文件 + subprocess 走，每次请求独立进程，**天然无此坑**
+
+### 凭据访问红线
+
+**Kimi WebBridge 的 daemon 不需要 API key**——它是本机 HTTP localhost:10086 协议。**不要**：
+
+- ❌ 尝试 base64 解码 `Authorization: Bearer ***`（ov-mcp-server / Hermes plugin 配置里的敏感字符串）
+- ❌ 在 SDK 里硬编码任何 secret
+- ❌ 把 Kimi WebBridge 调用包装成走外部 HTTPS endpoint（localhost 是唯一合法目标）
+
+`viking_*` 工具凭据由 Hermes 内置 plugin 负责，agent 不要碰 base64 解码——碰了直接碰安全红线（2026-09-08 实战教训：差点绕过去发 HTTP 请求，及时退出）。
 
 ---
 

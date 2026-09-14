@@ -1,7 +1,7 @@
 ---
 name: deepseek-harness-ops
 description: "DSH 本机操作：headless 调用、状态检查、key 定位。触发词：DSH。"
-version: 1.4.0
+version: 1.4.1
 author: Hermes Agent
 license: MIT
 platforms: [windows]
@@ -41,7 +41,67 @@ curl -s -o /dev/null -w "HTTP %{http_code}" -m 5 http://127.0.0.1:8080/
 
 **重启 DSH**：`taskkill /F /PID <pid>` → 后台启动 `node --max-old-space-size=8192 --import tsx/esm apps/cli/src/bin.ts web --port 8080`（用 terminal background=true）→ 等 5-8 秒 curl 验证 HTTP 200。
 
+**⚠️ DSH 启动器迁移 + 计划任务未同步 = 永久哑死（2026-09-07 实测）**
+
+DSH 启动器经历过两代迁移，**任务路径与磁盘位置可能脱节**：
+
+| 代次 | 脚本 | 实际位置（2026-09-07 实测） | 适用版本 |
+|------|------|------|---------|
+| memos 时代 | `restart_memos_fix.cmd` | `_archive/memos-hindsight-2026-08-27/`（**已归档**） | 历史 |
+| harness 时代 | `restart_dsh_web.cmd` | `scripts/restart_dsh_web.cmd`（**当前唯一可用**） | 当前 |
+
+**症状**：`schtasks /query /tn "\DSH_Restart_V2" /fo LIST /v` 报 `Status: Disabled / Last Result: -1`，`Task To Run` 仍指 `restart_memos_fix.cmd`——脚本早搬到 `_archive` 子目录里，schtasks 找不到文件永久失败。**重启 Windows / 手动 schtasks /Run 全部救不了**（任务卡在 -1 状态）。
+
+**判别三件套**：
+```bash
+# 1. 任务实际指向
+schtasks /query /tn "\DSH_Restart_V2" /fo LIST /v | grep "Task To Run"
+# 2. 该路径在磁盘上是否真存在
+ls "C:\Users\HMSJ\Documents\Hermes\scripts\restart_memos_fix.cmd" 2>&1
+# → "No such file" = 任务指了死路径
+# 3. 当前新启动器在场？
+ls "C:\Users\HMSJ\Documents\Hermes\scripts\restart_dsh_web.cmd"
+```
+
+**修复**（替换为新启动器）：
+```bash
+schtasks /delete /tn "\DSH_Restart_V2" /f
+schtasks /create /tn "\DSH_Restart_V2" \
+  /tr "C:\Users\HMSJ\Documents\Hermes\scripts\restart_dsh_web.cmd" \
+  /sc once /st 00:00 /f
+schtasks /run /tn "\DSH_Restart_V2"
+curl -sS -o /dev/null -w "8080: HTTP %{http_code}\n" -m 5 http://127.0.0.1:8080/
+```
+
+**预防**：DSH 升级 / 启动器迁移时（memos → harness → 未来其他版本）必须同步审计所有 DSH_* 计划任务的 `Task To Run` 字段，**别信脚本已就位 = 任务已对位**。`Disabled + Last Result -1` ≠ "用户主动停了"——大概率是任务指了死路径。
+
+`restart_dsh_web.cmd` 内部关键两步：`for /L 1,1,40` 轮询 `:8080 .* LISTENING` 等旧进程句柄释放（避免 TIME_WAIT bind 失败）→ `cd /d <harness-source>` + `node --max-old-space-size=8192 --import tsx/esm apps/cli/src/bin.ts web --port 8080`。这是 watchdog 失败时手动重建的标准动作。
+
 **⚠️ V8 OOM 退出码 134（2026-08-19 教训）**：DSH 默认 4GB heap 不够 agent harness + web + 长跑 sessions 占用，约 20+ 分钟后会触发 `FATAL: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory`，进程以退出码 **134**（SIGABRT 实际是 node FATAL，不是真信号）崩。**必须显式扩 heap**：启动参数加 `--max-old-space-size=8192`（或更大，看机器内存）。本仓库的 `dsh_watchdog.py` 已经默认带这个参数（DSH_ARGS 第一个元素，2026-08-19 已 commit `fix(dsh): 看门狗显式 8GB heap 防 V8 OOM 退出码 134`）。
+
+**⚠️ DSH 必须和 Hermes 桌面解耦（2026-08-19 解耦铁律，2026-08-20 实测闭环）**：DSH 的「Hermes ↔ DSH」协作链路要求 DSH web 长跑常驻（cron / 桥 / 桌面插件 dsh-inbox 全靠它），**进程树必须独立于 Hermes 桌面**——Hermes 桌面关掉不能拖累 DSH，DSH 崩也不能拖累 Hermes。
+
+✅ **正确起法**：watchdog 计划任务（schtasks 跑 DSH_Watchdog → python dsh_watchdog.py → subprocess.Popen + `DETACHED_PROCESS` 起的 node 进程父进程退出，PPID 漂走 = Win32 孤儿）。这种进程的 `ParentProcessId` 在 Get-CimInstance 查不到，就是解耦成功。
+
+❌ **错误起法**：
+- `terminal background=true` 起的 node —— 是 Hermes 桌面 terminal 工具的孙子进程（bash → python → node），Hermes 桌面关 = 进程全带走
+- 任何从 Hermes 桌面 terminal 工具/IDE/集成终端起的 DSH —— 父进程是桌面进程链
+
+**验证解耦**（必须三路证据）：
+```bash
+# 1) 找 DSH node 进程的 PID
+netstat -ano | grep ":8080" | grep LISTENING
+# 2) Get-CimInstance Win32_Process -Filter "ProcessId=<PID>" → 看 ParentProcessId
+#    解耦成功 = ParentProcessId 查不到（DETACHED_PROCESS 后父进程已退出）
+#    未解耦  = ParentProcessId 是 python.exe (Hermes 桌面 terminal 工具) 或 explorer.exe (桌面进程)
+# 3) curl 8080 健康 + session.create API 200
+```
+
+**自愈链**：watchdog 每5分钟端口检测 + 10分钟冷却防拉起风暴 + state 文件记每次拉起时间戳。Hermes 桌面挂了 → watchdog 仍然在 schtasks 下独立调度 → DSH 自动恢复（8-13秒冷启动延迟可接受）。
+
+**复用既有机制**：scripts/dsh_watchdog.py 已经做对了——任何"DSH 进程被 Hermes 桌面挂着"的现象都是临时性的（用户手动 terminal 起的、或 watchdog 上一轮还没拉完），watchdog 下一轮自动替换成解耦实例。
+
+**⚠️ MSYS bash + PowerShell `$_` 误解析（2026-08-20 实测）**：从 Hermes terminal 工具直接跑 `Get-CimInstance ... | Where-Object { $_.ProcessId -eq X }` 时，bash 在把内联 powershell 传到 Windows 进程前会把 `$_` 当成 shell 变量替换起点，结果 powershell 收到 `processId`（去掉前缀）然后报 `CommandNotFoundException`，再 bash 还反复重试 → 命令挂死 180s 超时。**对策**：把 PowerShell 写到 `.ps1` 文件（`%TEMP%\check_pid.ps1`），用 `subprocess.run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', '...'], ...)`（Python execute_code）调用或 `powershell -File path.ps1`（terminal）；永远不要把 `$_` 内联在 powershell -Command "..." 里。**额外坑**：`$pid` 是 PowerShell 内置只读变量，`$pid = 15916` 会报 `VariableNotWritable`——改名（如 `$target = 15916`）。
 
 **⚠️ 重启后"还活着"的假象**：用 `terminal background=true` 起的 DSH 是父 bash 的子进程；如果该 bash 后台进程被信号干掉（hermes background 进程有退出码回收延迟，常见 134/1 回声延迟送达），**DSH 子进程若已 detach 会继续跑**——`tasklist | grep node` 看到的可能是孤儿节点，但**端口早就没人监听了**。唯一可靠验证：`curl -sS -o /dev/null -w "HTTP %{http_code}\n" -m 5 http://127.0.0.1:8080/`。看到 `HTTP 200` 才算真活着。
 

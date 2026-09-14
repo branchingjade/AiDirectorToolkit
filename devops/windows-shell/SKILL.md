@@ -3,7 +3,7 @@ name: windows-shell
 description: |
   Safe PowerShell and Windows command patterns when running through bash (MSYS/git-bash)
   on this Windows host. Covers escaping, process management, and tool installation pitfalls.
-version: 1.0.0
+version: 1.0.1
 platforms: [windows]
 metadata:
   hermes:
@@ -199,6 +199,92 @@ netsh interface ipv4 show excludedportrange protocol=tcp
 
 **辨别谁在跑**：`type -a curl` 看第一个命中是 `/mingw64/bin/curl`（MSYS）还是 `C:\Windows\System32\curl.exe`（Windows 原生）。本机两者都可能出现在 PATH 前面。
 
+## 注册用户级 PATH + shim 包裹 workspace 脚本（Windows CLI 全局化）
+
+安装 Windows CLI（kimi-webbridge / Rustup / 任何 %USERPROFILE%\.foo\bin\）后，新 shell
+找不到命令 → 需要把 bin 目录加到 PATH。**用户级**（HKCU\Environment）即可，**不动**
+Machine PATH（需要 admin 且污染所有用户）。
+
+### 模板：写一个 .ps1 加 User PATH（幂等，不重复）
+
+```powershell
+$target = 'C:\Users\HMSJ\.foo\bin'   # 要加入的目录
+$cur = [Environment]::GetEnvironmentVariable('Path','User')
+
+# 注意：变量用 ForEach-Object 过滤 + Trim，不用 $_（bash 吞）
+$paths = $cur -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+if ($paths -contains $target) {
+    Write-Host '[skip] already on user PATH'
+    exit 0
+}
+$new = ($cur + ';' + $target).Trim(';')
+[Environment]::SetEnvironmentVariable('Path', $new, 'User')
+```
+
+**bash 里调 powershell 别用 `$_`**——MSYS 当 bash 变量取空，PS 收到的是
+`if (-contains $target)` 直接报语法错。统一用命名变量 `Where-Object { $paths -contains $target }`
+或先 `ForEach-Object { $_.Trim() }` 抓中间变量再过滤。
+
+### ⚠️ 验证 PATH 注册成功的两个反直觉陷阱
+
+**陷阱 1：`powershell -NoProfile -Command` 不重读注册表 User PATH**。它继承的是进程
+启动时的 `$env:Path` 副本；只有用户**手动打开的交互式 PowerShell 窗口**才会重读注册表。
+脚本写完想在同一个 bash 里验证，必须先 refresh：
+
+```bash
+powershell -NoProfile -Command "
+\$env:Path = [Environment]::GetEnvironmentVariable('Path','User') + ';' + [Environment]::GetEnvironmentVariable('Path','Machine')
+# 现在才认得新加的 PATH
+"
+```
+
+**陷阱 2：`Get-Command foo` 不走 PATH 查找**——默认只搜 PowerShell 认识的 cmdlet/函数/
+alias，应用 `Get-Command foo -CommandType Application` 才会枚举 PATH 里的 .exe/.cmd。
+但**裸命令调用**（`foo --help`）是正常工作的，PowerShell 实际会通过 PATHEXT 找
+（PATHEXT 默认含 `.CMD` `.BAT` `.EXE`）。所以验证流程：
+
+```powershell
+# WRONG — 会误报"找不到"，实际可用
+PS> Get-Command foo
+PS> (Get-Command foo -ErrorAction SilentlyContinue).Source   # 空字符串
+
+# RIGHT — 命令实际跑得通
+PS> foo --help
+PS> Get-Command foo -CommandType Application   # 显式指定才显示
+```
+
+**陷阱 3（Python 视角）**：`shutil.which('foo')` 在 Windows 默认不识别 `.cmd`/`.bat`
+（仅 .exe）——验证 PATH 时假阴性。
+
+### 用户目录 shim（`.cmd` 包裹 workspace 脚本）
+
+把 workspace 里的 Python CLI（`scripts/xxx.py`）变成裸命令 `xxx`，shim 文件放**用户级
+bin 目录**（已在 PATH 上）：
+
+```cmd
+@echo off
+set "SCRIPT=C:\Users\HMSJ\Documents\Hermes\scripts\xxx.py"
+set "PY=C:\Users\HMSJ\AppData\Local\Programs\Python\Python312\python.exe"
+"%PY%" "%SCRIPT%" %*
+exit /b %ERRORLEVEL%
+```
+
+**两种放位**（按场景选）：
+
+| 位置 | 优点 | 缺点 |
+|---|---|---|
+| `%USERPROFILE%\.local\bin\`（已在 PATH） | 不污染 workspace | 不 git 跟踪，多机器漂移 |
+| `workspace\scripts\`（已加 User PATH） | git 跟踪 + 自动同步 + 整个 scripts/ 全局可用 | workspace 路径绑死机器 |
+
+第二条路顺手的好处：`scripts/` 下其它 CLI（`attendance_cli.py`、`cron_monitor.py` 等）
+加完 User PATH 全部裸命令可用。
+
+### ⚠️ 旧版 shim 位置清理
+
+如果 shim 从 `~/.local/bin/` 搬到 `workspace\scripts\`，**一定 rm 旧位置**——避免
+两个同名 shim 同时在 PATH 上、调用行为漂移。`ls ~/.local/bin/ | grep -i <name>` 先
+看有没有遗留。
+
 ## Common pitfalls
 
 | Symptom | Cause | Fix |
@@ -207,11 +293,19 @@ netsh interface ipv4 show excludedportrange protocol=tcp
 | Move-Item fails with "文件已存在" / file exists | Target file locked by running process | Kill the process first, then Move-Item |
 | Process reappears after kill | Auto-restart mechanism (scheduled task, parent process, startup entry) | Check `Get-ScheduledTask`, `HKCU:\...\Run`, stop the parent first |
 | `2>$null` redirect fails | bash interprets `2>` as its own redirect | Use PowerShell-native `-ErrorAction SilentlyContinue` instead |
+| bash 内联 PowerShell 含 `$_`（ForEach-Object 管道变量）→ 216K 错误输出 / 进程树跑飞 | MSYS 把 `$_` 当 bash 变量取空 → PowerShell 收到 `if (.ProcessId -eq 15916)` 报 `ProcessId is not recognized`（2026-08-19 实测，`terminal` 工具连跑3次全 216K 错误输出/180s 超时） | **任何 bash 内联 PowerShell 都不能用 `$_`**——一律改用 `Where-Object` 链 + `.CommandLine` / `.ProcessId` 这种直接属性访问，或更稳的姿势：write_file 写 .ps1（BOM）+ `powershell -File` 跑。复用变量前赋名 `$p = Get-...` 也能避坑 |
+| `terminal(background=true)` 拉服务返回的 PID 是 **bash.exe，不是子进程**（2026-08-24 实测） | `background=true` 把整个 bash 命令当 background 任务调度，返回的 session_id 是 bash 进程 PID；子进程（node.exe 等）另起独立 PID，必须从 netstat/资源管理器按名称查 | **找真实子进程 PID 三步**：① `powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" \| Sort-Object WorkingSetSize -Descending \| Select-Object -First 3 ProcessId,WorkingSetSize,CreationDate"`；② `netstat -ano \| grep :<port>.*LISTENING` 拿 LISTENING PID；③ 不要相信 background 返回的 PID 是子进程——它只是 bash wrapper |
+| bash 后台 `&` 符号在 terminal 工具里被拒绝（报 "Foreground command uses '&' backgrounding. Re-send WITHOUT the '&' as terminal(command=..., background=true)"） | terminal 工具禁用 POSIX `&`，全部统一走 `background=true` 参数 | 想后台跑就 `terminal(background=true, notify_on_complete=true)`；notify_on_complete 设了之后等通知，别轮询 |
+| bash `for t in A B C; do schtasks /Change /TN "\$t" /DISABLE; done` 全部报 `task name "$t" does not exist` | 双引号内 `\$t` 经 bash 展开变成字面 `$t`（反斜杠被吞），传给 schtasks 的就是字面量 `$t` 而不是 `\DSH_MountOrphans` | 两种修法：① 把整个 `/TN` 参数用**单引号**包起来（单引号不展开 bash 变量），如 `schtasks /Change /TN '\DSH_MountOrphans' /DISABLE` 逐条手写；② 反斜杠双倍 `"\\\$t"` 让 bash 留给 schtasks 自己去解析，但更脆弱。**循环批量改 schtasks 的路径在 git-bash 下基本必踩**——逐条单引号最稳 |
+| `terminal(background=true)` 启动 DSH/长服务后收到 "Background process exited" 通知 ≠ 服务真死 | bash wrapper（PID=bash）退出时 background 通知触发，子进程（node.exe）另起 PID 继续跑；exit code 127 是 bash "command not found" 类的预期值 | 判断服务真死**只看 `netstat -ano | grep ":<port>.*LISTENING"`**——端口在 = 活的；wrapper 退出通知一律忽略。`Get-CimInstance Win32_Process -Filter "Name='node.exe'"` 按内存排序找真正 LISTENING 的 PID（memory=300MB+ 的那个），别信 background 返回的 PID |
+| `Write-Output "..."` 在 `.ps1` 里被 JSON 转义吃成 `Write-Output \"...\"` → "字符串缺少终止符" | write_file 走 JSON 传输，`\"` 会被原样落盘 | 落盘后 `grep -n '\\\\"' script.ps1` 核对；有反斜杠立即 `patch` 修；或 `od -c` 看实际字节。**别写完直接跑——先验文件** |
+| bash 内联 PowerShell 查进程链 `Get-CimInstance ... ParentProcessId` 链回查，链中某一环 `ParentProcessId=0` 时再 Get-CimInstance 该 PID → 卡 180s 超时 | 递归向上查进程链直到 PPID=0 是合法逻辑；但 Get-CimInstance 接到孤儿（PPID 已退出/查不到）不立即返回，**会等查询句柄超时**（实测180s 才超时退出），导致整个 powershell 进程挂死 | 进程链深度上限 3-5 层（`for ($i=0; $i -lt 5; $i++)`）即停；OR 用 `Where-Object { $_.ParentProcessId -ne 0 }` 过滤；OR 写 `.ps1` 用 `cmd /c timeout /t 5` 包一层强超时 |
 | bcdedit path 反斜杠被吃掉 | bash 把 `\W` `\E` 等当作转义处理 | 用单引号：`bcdedit /set {id} path '\Windows\...'`；不要用双引号和 cmd /c |
 | `bcdedit /set` path values lose backslashes | bash treats `\\` as escape char; `\\Windows` → `Windows` | Use **single quotes**: `bcdedit /set {id} path '\\Windows\\system32\\winload.efi'`. Double quotes, `\\\\`, and `cmd /c` all fail. |
 | 计划任务检测脚本报「进程不存在」但进程在跑（gateway/watchdog 类） | WMI 对非管理员遮罩 CommandLine：`Get-CimInstance` 枚举正常但 `CommandLine` 返回空 → 按命令行匹配必然误判 | 改用端口监听（netstat LISTENING）作主判据，或计划任务提权 `<RunLevel>HighestAvailable</RunLevel>`（枚举值不是 Highest）；详见上方「计划任务环境读不到进程 CommandLine」节 |
 | 服务监听端口报 `listen EACCES` 但 netstat 查无占用 | 端口落在 Windows 排除范围（Hyper-V/WSL 保留，如 3001-3100 含 3080） | `netsh interface ipv4 show excludedportrange protocol=tcp` 确认，换排除区间外的端口（服务一般支持 `--port`） |
 | `curl -o /tmp/x` 报成功但 `cat /tmp/x` 找不到文件 | `curl` 是 Windows 原生 curl.exe，把 `/tmp/` 当盘符根路径写到 `C:\tmp\`，bash 的 `/tmp` 是 MSYS 映射目录 | 直接 `curl ... \| head` 看 stdout；或 `-o "$HOME/x"`；`type -a curl` 辨别是 MSYS 还是 Windows 原生 |
+| `SetEnvironmentVariable('Path', ..., 'User')` 后 `Get-Command foo` 仍报"找不到" | (1) 当前进程不重读注册表 User PATH（要 refresh `\$env:Path` 或开新 shell）；(2) `Get-Command` 默认不走 PATH 查找，要 `-CommandType Application` | refresh env + 裸跑 `foo --help` 是最稳的验证；详见「注册用户级 PATH + shim」节 |
 
 ## .env 文件加载（git-bash）
 

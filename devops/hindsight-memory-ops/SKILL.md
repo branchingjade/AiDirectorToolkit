@@ -7,6 +7,8 @@ description: Hindsight 记忆运维：recall 验证、双实例陷阱。触发�
 
 Hindsight 是 Hermes 的外部记忆后端（memory.provider=hindsight，本地嵌入式）。本 skill 覆盖：recall 验证工作流、consolidation 进度检查、pg0 数据库直查、已知陷阱。凡涉及「Hindsight 能不能召回 X / 记忆积压 / 飞书内容入库」的任务先读本 skill。
 
+> **NAS MemOS 迁移 / 共存**：本 skill 末尾「第三方后端查证陷阱」+ `references/memos-migration.md`（端点形态/字段名差异/迁移脚本骨架）。MemOS 与 Hindsight 当前并存双写，停 Hindsight 的理由是冗余写而非"MemOS 接通"问题。
+
 ## 架构事实（本机实测 2026-08-07）
 
 | 组件 | 位置/端口 | 说明 |
@@ -249,3 +251,97 @@ grep "Document:" ~/.hindsight/profiles/hermes.log | tail  # retain 入库
 - 中文 JSON body → 用 Python 发请求，别用 bash 内联
 - 判定「未打通」前 → 确认 consolidation 已消化（observation 计数）且连对库
 - **验证完成前不下定论、不删验证工具**（2026-08-08 用户纠正「等验证后在做决定」）：consolidation 积压期间 recall 搜不到≠未打通，此时删除验证 cron / 把「结论已定」写进记忆会被用户打回——先等消化完成跑实测，三种结果（打通/失败/待定）都拿到再定论。判断「打通」要用大 limit 查（默认只返回前 10 条，飞书内容实测排第 6/10 位，默认视图会漏）
+
+## ⚠️ Hindsight 停用完整流程（2026-08-25 实测闭环：双保活路径 + 默认禁门控）
+
+> 用户拍板「完全禁掉 Hindsight 单独留档封存即可」→ 本节是禁用 Hindsight 本地嵌入的标准动作。任何"禁 Hindsight"任务先读本节。
+
+### 用户偏好（写进 skill，跨会话生效）
+
+**Hindsight 本地线 = 用户独立的本地事实源**（MEMORY.md = 69~73 条铁律），用户说"本地的单独的"= 拒绝合并/迁移到 NAS。**停 Hindsight 不是因为 NAS MemOS 接通了要合并——是因为冗余写浪费 token**，本地线本身保留。识别用户提"单独的""独立"= 按字面意思保留本地线，不强行合并。
+
+### 双保活路径（必须同时禁，单禁一边 daemon 仍会被拉起）
+
+Hindsight daemon（9177 端口）有两个独立保活机制，**两者都禁才算真停**：
+
+| 保活者 | 形态 | 禁用方法 |
+|---|---|---|
+| **计划任务 `Hermes_Hindsight_Daemon`** | 每 5 分钟跑 `scripts/hindsight_daemon_guard.py`，无 9177 则拉 daemon | `schtasks /Change /TN \Hermes_Hindsight_Daemon /Disable` |
+| **gateway_watchdog.py 的 `ensure_hindsight_daemon()`** | 每 5 分钟随 gateway watchdog 跑，9177 无监听则拉 daemon | 在函数体首行加环境变量门控（**默认禁用，仅 HINDSIGHT_ENABLED=1 时启用**） |
+
+只禁其中之一 = 下次 5 分钟内 daemon 被另一个拉起 → MEMORY.md 又开始被写入。**用户已踩过一次坑（2026-08-25 实测：先禁任务，watchdog 跑一次又把 daemon 拉起 → 我又改 watchdog 门控才真停）。**
+
+### 标准停用动作（顺序执行，缺一不可）
+
+1. **备份 `hindsight/config.json`**：`shutil.copy2` 到 `.bak-stop-hindsight-<时间戳>`（恢复要靠这个）
+2. **改 `hindsight/config.json`**：`auto_retain: false` + `auto_recall: false` + `retain_every_n_turns: 0` + `recall_types: ""`（不改文件内容，只改行为）
+3. **改 `scripts/gateway_watchdog.py` 的 `ensure_hindsight_daemon()` 函数体首行加门控**：
+   ```python
+   if os.environ.get("HINDSIGHT_ENABLED", "").lower() not in ("1", "true", "yes"):
+       print(f"[{now_str()}] Hindsight daemon 已停用（默认禁保活），跳过")
+       return "daemon_disabled"
+   ```
+   - **默认禁用**（不依赖外部环境变量），恢复时 set `HINDSIGHT_ENABLED=1` 即可
+   - docstring 用 **r-string**（`r"""..."""`）防 `\H` 转义警告（任务路径 `\Hermes_Hindsight_Daemon`）
+   - 改完跑 `python -c "import py_compile; py_compile.compile('...', doraise=True)"` 验语法
+4. **禁用计划任务**：`schtasks /Change /TN \Hermes_Hindsight_Daemon /Disable`
+5. **冷备份 MEMORY.md / USER.md / config.json**：建 `memories/.archive/<时间戳-hindsight-stopped>/` 子目录，写 README 恢复指南 + 4 份 `.archive-snapshot` 文件
+6. **MEMORY.md 原状不动**（用户偏好"本地的单独的"），仅加一行 HTML 注释 marker：`<!-- archive-snapshot: <路径> | hindsight daemon stopped at <时间> -->` 标注封存事实（不动既有条目）
+7. **重启 gateway**：杀 `gateway run` PID（`Stop-Process -Id <pid> -Force`，**勿用 taskkill**，曾报 Access denied）→ 等 5~10 秒 → 直接调 `Hermes_Gateway.cmd` 拉起（或等 `Hermes_Gateway_Watchdog` 9:15 自然拉，但用户偏好"立刻能工作"就手动拉）
+8. **验证链路（4 项缺一不可）**：
+   - 跑一次 `gateway_watchdog.py --force` → 输出包含「Hindsight daemon 已停用（默认禁保活），跳过」
+   - `netstat -ano | grep :9177` 无 LISTENING
+   - `Get-CimInstance Win32_Process | Where CommandLine -match "hindsight_api.main"` 无 daemon 进程（**注意**：powershell grep 自己会包含 "hindsight_api.main" 字符串，要看 PID 进程的 cmdline 真启动 daemon 才算）
+   - 30+ 分钟后 `memories/MEMORY.md` mtime 不再更新（auto_retain 真的停了的最终证据）
+
+### 停用前的诊断铺垫（避免误杀）
+
+停 Hindsight 前**必须**先确认 NAS MemOS（或目标后端）真在接数据，方法见上方「第三方后端查证陷阱」：
+
+1. **多端点交叉验证**：dashboard / search / get_memory 各查一遍
+2. **真实字段名**：前端源码 / openapi.json 反推（不要凭直觉）
+3. **用户截图 = 真源**：单次 API 返回空别立刻断言"后端空"
+
+停 Hindsight 前还**必须**先确认 daemon 当前真没在 retain MEMORY.md（避免一边停一边被覆盖）。看 `MEMORY.md` 当前 mtime + 大小，作为基线。
+
+### 恢复方法（写在 archive README.md 里）
+
+1. 删 `gateway_watchdog.py` 的门控（或改成 HINDSIGHT_ENABLED 默认启用）
+2. 启计划任务：`schtasks /Change /TN \Hermes_Hindsight_Daemon /Enable`
+3. 用 `config.json.archive-snapshot` 覆盖 `hindsight/config.json`（恢复 auto_retain/auto_recall）
+4. 等守护自然拉起 daemon（9177 LISTENING）—— 或单实例手动：`cd "$LOCALAPPDATA/hermes" && "$LOCALAPPDATA/hermes/hermes-agent/venv/Scripts/pythonw.exe" -m hindsight_api.main --daemon --idle-timeout 0`
+5. 重启 gateway 让 provider 配置 reload（杀 PID → `Hermes_Gateway.cmd`）
+
+### watchdog `--force` 误判陷阱
+
+`gateway_watchdog.py --force` 跑完会打印「进程存活=True 健康无需动作」，但实际可能 8644 不在 LISTENING。原因：watchdog 的 netstat 检测在某些 powershell/cmd 环境下 netstat 输出与直接 terminal 不一致（实测 2026-08-25：watchdog 跑出来 alive=true 但 netstat 看不到 8644）。**别信 watchdog 单次 --force 判定，先看 `curl :8644/health` 200 + netstat LISTENING 双向确认**。watchdog 写于 2026-08-07 那次修复（计划任务环境 Get-CimInstance 读不到其他进程 CommandLine）但仍有边界 case。
+
+### Archive 目录模式（停用类操作的通用存档模板）
+
+`.archive/<时间戳-事件名>/` 子目录放 4 类文件：
+- `<原文件名>.archive-snapshot`（每个要保留的文件一份）
+- `<原文件名>.lock.snapshot`（如有锁文件）
+- `config.json.archive-snapshot`（相关配置文件）
+- `README.md`（事件描述 + 文件清单 + 恢复方法 + 恢复注意事项）
+
+**保留原文件不动**（满足"本地的单独的"原则） + archive 副本兜底（满足"封存"语义）。这套模式适用于任何"停用 X 但保留配置/数据"的操作。
+
+## ⚠️ 第三方记忆后端（MemOS / OpenViking 等）的查证陷阱（2026-08-24 用户纠正）
+
+**本节是跨会话铁律，比 Hindsight 端点的细节更重要——同样的错误会出现在任何第三方后端 API 上。**
+
+❌ **错**：`search` 返回空 → 断言后端"空/未接通" → 给用户做迁移/封存建议 → 用户截图证明你错
+
+✅ **对**：当任意后端 API 查询返回"看似空"的结果时——
+
+1. **不要立即下"空"的结论**——单次查询失败 ≠ 数据不存在
+2. **查实际工作端点的字段名**：从用户截图、前端源码、SDK 调用代码反推真实字段（`mem_cube_id` vs `cube_id` 是典型——同一后端不同端点字段不同）
+3. **多端点交叉验证**：dashboard / search / list / get_memory 各端点字段组合不同，**任一返回空先换端点**
+4. **用户截图 = 真源**：用户给截图证明数据存在时，别用自己的失败查询反证用户错——错的几乎总是自己
+
+**本机 MemOS 实例的真值（2026-08-24 实测）：**
+- NAS MemOS（`192.168.1.2:8001`，MemOS Server REST v2.0.3-krolik）
+- cube `hermes-memory` 已有 **12,214 条 text_mem 节点**（来自 DSH damage-pulse cron + 当日对话 retain + 历史积累）
+- 框架 retain 主路径已通——`memory.provider: memos` 实际生效（即使 `providers.memos: {}` 空配置也不影响主路径）
+- Hindsight 本地嵌入与 MemOS 并存双写；停 Hindsight 的理由是**冗余写浪费 token**，不是"MemOS 接通"
+- 完整端点形态、字段名差异、迁移脚本骨架见 `references/memos-migration.md`

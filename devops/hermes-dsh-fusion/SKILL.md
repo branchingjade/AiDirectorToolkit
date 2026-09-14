@@ -11,6 +11,7 @@ metadata:
     related_skills: [hermes-workspace-conventions, hermes-dsh-skill-sync]
     changelog:
       - 2.5.1 (2026-08-20): 记忆层切换 MemOS——记忆共享写入规范改为 MemOS（NAS :8001，memos.py CLI），Hindsight 停用保留可回滚
+      - 2.5.2 (2026-08-27): ⚠️ DSH 已归档（scripts/Projects 全部移到 `*_archive/dsh-2026-08-27/`，进程停止）。当前 Hermes 默认不启用 DSH 引擎。本 skill 保留供考古，**不要按本 skill 的默认引擎铁律实施**——参考 hermes-provider-fallback 决策当前执行模型。
       - 2.5.0 (2026-08-20): 坑 21 路径 C 第二刀落地（commit `078f407` 桥 CLI source 缺失硬性 warn）+ 坑 22 补充「计划任务命名陷阱」+ 坑 23 新增（source hard warn）+ 计划任务改名 `Hermes_DSH_Inbox_Watcher` → `DSH_Mux_Listener_Polling` 全栈同步
       - 2.4.0 (2026-08-20): 坑 21 路径 C 第一刀（commit `2630cfc` 砍监听器 cwd 兜底）+ 坑 22（zombie listener）+ 记忆共享写入规范
 ---
@@ -71,6 +72,38 @@ python scripts/dsh_bridge.py list
 **DSH web 启动与保活（2026-08-19 OOM 教训固化）**：
 - 启动命令**必须带 8GB heap 上限**（rc.7 升级后默认 heap 跑大任务会 OOM 崩溃）：`cd Projects/deepseek-harness && node --max-old-space-size=8192 --import tsx/esm apps/cli/src/bin.ts web --port 8080`
 - **自动保活**：计划任务 `DSH_Watchdog`（每 5 分钟）→ `scripts/dsh_watchdog.py`（工作区 git 管理，**2026-08-20 升级版 commit `515f726`**：HTTP 探测+命令行校验防三盲区，PID 存活追踪防双崩集群冷却延迟；日志 `.hermes/dsh_watchdog.log`、状态 `.hermes/dsh_watchdog_state.json` 含 `last_pid`/`last_pid_started_at`）。看门狗失效排查：脚本文件丢失（曾因清理误删导致任务空转）或进程退出——重建脚本 + `schtasks /change /tn DSH_Watchdog /tr "pythonw <scripts路径>"`。
+
+**DSH 升级 / 原地重装（2026-08-24 rc.8→rc.2 实战 + 清理重装）三铁律**：
+
+1. **升级/重装前先禁用 `DSH_MountOrphans`**（schtasks `/Change /Disable`）——升级窗口它一旦跑会 kill 8080 + 改 `workspace.json`，覆盖手动备份。**⚠️ git-bash 里 `for t in ...; do schtasks /Change /TN "\$t" /DISABLE; done` 全部报 `task name "$t" does not exist`**——双引号内 `\$t` 经 bash 展开变字面 `$t`，传给 schtasks 的就是字面量 `$t`。**逐条用单引号手写**：`schtasks /Change /TN '\DSH_MountOrphans' /DISABLE`（单引号不展开 bash 变量）。详见 windows-shell skill 坑表。
+2. **`~/.dsh/.credentials.yaml` BOM 检查（rc.2+ 必做）**：`head -c 5 ~/.dsh/.credentials.yaml | od -An -c` — 首字节不能是 `357 273 277`（UTF-8 BOM EF BB BF）。rc.2 在 `packages/credentials/credentials/src/index.ts:28` 的 `credentialRef()` 新加严格正则 `/^[A-Za-z_][A-Za-z0-9_]*$/`，BOM/全角字符会让整个 plugin tree 加载失败（throw → process.exit），症状是 `[dsh-damage-pulse]` 之前就退出。**修复**：python 原地剥 BOM（剥文件首 + 行内），458→455 bytes，**密钥不动**——只切掉 BOM 字节：
+
+   ```python
+   src = r"C:\Users\HMSJ\.dsh\.credentials.yaml"
+   with open(src, 'rb') as f: data = f.read()
+   BOM = b'\xef\xbb\xbf'
+   data = data.lstrip(BOM).replace(BOM, b'')  # 剥文件首 + 行内
+   with open(src, 'wb') as f: f.write(data)
+   ```
+   备份原始 `.credentials.yaml.BOM.bak.full` 后再切。
+3. **`git clone --depth 1 master` 后必须 build 两步**（否则 plugin tree / web-app 都崩）：
+   ```
+   rm -rf Projects/deepseek-harness     # rm 偶发 "Device or resource busy"（DSH watcher/子进程未释放），但 git clone 仍能在已存在目录继续，不影响结果
+   git clone --branch master --depth 1 https://github.com/deepseek-ai/deepseek-harness.git
+   cd Projects/deepseek-harness
+   "C:/Program Files/nodejs/npm.cmd" exec --no -- pnpm install --frozen-lockfile
+   pnpm run build:lib                    # workspace 包 src → lib（缺则 plugin tree 报 "Cannot find module ... lib/index.js"）
+   pnpm run build                        # 前端 apps/web/dist（缺则 web-app 报 "frontend dist not built; run pnpm run build from the repository root first"）
+   启动验证    # HTTP 200 size=0 time=7s 才是稳态
+   ```
+   **`pnpm install` 不会自动编译 src**——它是 dev install 只建 node_modules symlink，不编译 src。`build:lib` 编 workspace 包（`@deepseek-ai/dsh-credentials` / `dsh-settings` / `dsh-balance` 等用户插件依赖的 `lib/index.js`），`build` 编前端 dist。DSH 源码 `AGENTS.md` 官方推荐序列就是这个。
+
+**升级 / 重装验收 gate（缺一不算）**：
+- `test_dsh_bridge_p0.py` 18/18 + `test_dsh_bridge_p0_e2e.py` 7/7（fake rpc 不打 8080）
+- 起一个真任务（hello world 写文件类，30s 内完）：`python scripts/dsh_bridge.py run <cwd> "<task>" --route <route> --new --timeout 120 --source cli --owner cli` → BRIDGE_RESULT `status=done + turnEndReason=completed`
+- `verify_bridge_result.py <bridge_json> --artifact <path> --min-bytes 30 --sentinel <str>` → exit 0 `verified`
+
+**`terminal(background=true)` 启动 DSH 后的 wrapper exit 通知 ≠ DSH 死亡**：bash wrapper（PID=bash）退出时 background 通知触发，子进程（node.exe）另起独立 PID 继续跑。判断 DSH 真死**只看 `netstat -ano | grep ":8080.*LISTENING"`**——端口在 = 活的；wrapper 退出通知一律忽略，找真 PID 用 `Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Sort-Object WorkingSetSize -Descending | Select-Object -First 3 ProcessId,WorkingSetSize,CreationDate`。
 
 ## 什么时候用桥（默认用，精确判据）
 

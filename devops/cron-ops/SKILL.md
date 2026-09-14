@@ -125,6 +125,31 @@ cron job 的 prompt 里让 agent 用 terminal 跑脚本时，**路径写法直�
 
 cron-monitor 管 job 创建/输出格式/渠道规则；本 skill 管调度机制/投递排障/消息编辑。重叠处（99992402 坑）两边都有，待 curator 合并。
 
+## cron agent 误报"前置脚本失败"陷阱（2026-08-26 伏妖记审读实测）
+
+**陷阱现象**：cron agent run 输出文件里出现 "## Script Error / The data-collection script failed. Report this to the user. Script execution failed: subprocess.run() got multiple values for keyword argument 'errors'" ——但**当前 fire 在 `executions.db` 里 status=completed、error=None，agent pipeline 0→6 全跑完、评论挂上了、简报投递了**。agent 简报开头仍写"数据采集脚本失败，未影响本次"。
+
+**根因（双重误判）**：
+
+1. **scheduler 错误注入机制**：`scheduler.py:4263-4265` 在 `_run_job_script` 返回 `(False, ...)` 时**把错误文本拼到 agent prompt context** 里（"## Script Error / Report this to the user / ```<stderr>```"）。这是设计行为，不是 bug——但**触发条件是"前置脚本这次返回 false"，不是"今天整体失败"**。
+2. **prompt context 复用**：agent 每次 cron run 的 prompt 模板从**上一次失败的 prompt 快照**继承下来。如果上一次 fire 的 prompt 里被注入了"Script Error"段，**这次 prompt 也带着这段**——即使这次 `_run_job_script` 返回 success=True。
+3. **agent 误读历史 context 当本次事实**：agent 看到 prompt 里有"Script Error"段就**判断为本轮撞错**，在简报里写"本轮触发 TypeError..."——但实际这次 fire 状态干净。
+
+**正确诊断流程（不要凭 agent 简报判断 bug 是否复发）**：
+
+1. **查 `executions.db` 真实 status**：`SELECT status, error FROM executions WHERE id=<fire_id>`——`completed` + `error=None` = cron runner 视角未失败
+2. **看 agent 实际产出文件**（`~/AppData/Local/hermes/cron/output/<job_id>/<时间>.md`）末尾——如果"## Response"段有真实内容（评论挂上、基线更新等），说明 pipeline 跑完了
+3. **看 agent 简报里"X 步骤失败"声明**——**逐句对照实际产出文件**确认，不要凭简报自我佐证
+4. **核对 prompt context 是否含历史错误段**：读产出文件里 "## Prompt" 段，搜 "## Script Error" / "data-collection script failed" ——如果有但 executions.db 显示本 fire completed，**就是 prompt cache 复用历史错误**，不是真错
+
+**处置**：
+
+- 如果 executions.db 显示 completed + 实际产出 pipeline 跑完 → **不要改 scheduler.py、不要重跑**——这是 prompt 复用问题，下次自然 fire 通常不带这段
+- 如果想立即清掉历史错误段污染 → **重启 gateway**（`taskkill /F /PID <gateway_pid>` + `schtasks /Run /TN "Hermes_Gateway"`），新 gateway 的 prompt builder 会从干净基线开始
+- agent 简报里的"本次撞错"声明**作为 prompt 复用信号记下来**，不要作为修复依据
+
+**判定口诀**：「`last_status=ok` + `executions.db error=None` + 实际产出 pipeline 走完 + 简报开头说撞错」= agent 误报 prompt 复用，**不是真 bug**。这是比 last_status=ok 单一字段更强的判定——cron-ops 的健康检查链已覆盖此场景。
+
 ## 飞书 Drive 文件夹监控模式（2026-08-14 伏妖记审读 cron 实测）
 
 监控「飞书云文档里的项目文件夹」变化（新增/改动文档），LLM cron 定期对比文件夹快照：
@@ -136,3 +161,54 @@ cron-monitor 管 job 创建/输出格式/渠道规则；本 skill 管调度机�
 - **多文件夹输出拼接解析**：多个 `files list --format json` 输出 `>` 追加进同一文件是多个 JSON 对象拼接，`json.load` 报 "Extra data"——用 `json.JSONDecoder().raw_decode` 循环流式解析（逐个切出对象），勿先 json.load
 - **改动文档分流**：剧本正本改动→完整审读+挂评论；其他文档改动（项目文档/设定方案）→fetch 全文提炼新决策要点进简报、交叉核对一致性，不挂评论
 - **正本原则**：监控目标=飞书云文档文件夹（正本权威源），Obsidian 归档可能已落后——用户明确要求盯飞书、不盯 Obsidian（2026-08-14 伏妖记案例：Obsidian 已落后很多）
+
+## Cron 调度策略实战铁律（2026-08-11 拍板，2026-08-27 巩固）
+
+> 从 MEMORY.md 迁出（Phase 6 精简）。本节是上方"工作日 cron"的精简铁律。
+
+### 三大铁律
+
+1. **维护类 vs 工作类 cron 必须区分**
+2. **维护类与用户自己的 cron**：每天触发，不排除节假日
+3. **工作类 cron**：走工作日模式 = 每天触发 + `cn_holiday_check.py` 三态判定
+
+### 三态判定
+
+| 标记 | 含义 | agent 行为 |
+|------|------|------------|
+| `WORKDAY` | 普通工作日 + 调休补班的周末 | 继续执行 |
+| `HOLIDAY` | 法定放假日 | 立即回复 `[SILENT]` 结束 |
+| `WEEKEND` | 普通周末 | 立即回复 `[SILENT]` 结束 |
+
+**调休补班**的周末 = `WORKDAY`（即使本来是周末）——这是中国节假日特有的判定，必须查 `cn_holidays.json` 的 `workdays` 字段。
+
+### Cron prompt 脚本路径
+
+⚠️ **MSYS 转换坑**：cron prompt 里写 Windows 路径必须用**正斜杠 + 单引号**（`'C:/...'`），禁 `~` 与反斜杠。
+
+```json
+{
+  "prompt": "python 'C:/Users/HMSJ/AppData/Local/Temp/holiday_check.py' ..."
+}
+```
+
+**反例**（会被 MSYS 转换搞坏）：
+- `~/...` → 变 `C:\c\Users\...`
+- `C:\...` → 变 `C:\c\...`
+- 双引号 + `$variable` → 变量展开成转义字符串
+
+### 数据文件
+
+`cn_holidays.json`（HERMES_HOME/scripts/）：
+- `holidays`: 法定放假日列表（含连休全部日期）
+- `workdays`: 调休补班日列表
+
+每年 11 月国务院公布次年安排后**更新次年 key**（如 `2027`）。未配置年份脚本退化为基础周判定（不阻断）。
+
+### 验证清单
+
+- [ ] 维护类 cron（备份/巡检/token 检查）`schedule=0 8 * * *`（每天）
+- [ ] 工作类 cron（审读/摘要/健康检查）`schedule=0 8 * * *` + 挂 `cn_holiday_check.py`
+- [ ] agent 简报第一行有 `WORKDAY/HOLIDAY/WEEKEND` 标记
+- [ ] cron 输出文件 `~/.hermes/cron_outputs/<id>.log` 节假日只有 `[SILENT]` 行
+- [ ] prompt 路径用正斜杠 + 单引号

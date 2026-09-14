@@ -1,6 +1,6 @@
 ---
 name: hermes-monitoring
-description: Monitor Hermes Agent token usage, costs, and credential health. Use when the user wants to query session analytics, build cost dashboards, or inspect Hermes data.
+description: Monitor Hermes Agent token usage, costs, and credential health. Use when the user wants to query session analytics, build cost dashboards, or inspect Hermes data. **Full multi-surface health audit (processes/ports/cron/credentials/channels/system/DSH) when user asks "检查hermes健康度": see `references/full-health-audit.md`** — distinct from Runtime Health Check (single-service liveness) and from `hermes-maintenance/references/quick-health-check.md` (post-fix 6-step verification).
 ---
 
 # Hermes Monitoring
@@ -94,12 +94,12 @@ On Windows: `C:\Users\<user>\AppData\Local\hermes\state.db`（路径用正斜杠
 
 ```bash
 # 1. 端口监听（全部服务端口）
-netstat -ano | grep LISTENING | grep -E ":(8644|8642|9177|9119|8080)"
+netstat -ano | grep LISTENING | grep -E ":(8644|8642|9119|8080)"
 #    8644 = gateway webhook 平台（gateway 进程内）
 #    8642 = API Server（OpenAI 兼容端点，gateway 进程内）
-#    9177 = Hindsight 记忆 daemon（独立进程，由 guard 计划任务 Hermes_Hindsight_Daemon 每5分钟保活）
 #    9119 = 远程 serve
 #    8080 = DSH web（完全独立于 Hermes，由 DSH_Watchdog 计划任务每分钟保活，需 DEEPSEEK_API_KEY）
+# ⚠️ 不要监听 9177：Hindsight daemon 已退役（2026-08-25），见下文 pitfall
 # 2. 日志新鲜度（logs/ 下 gateway.log mtime 在几分钟内 = 正在跑）
 ls -lt "$LOCALAPPDATA/hermes/logs/" | head
 # 3. 进程确认（大内存 python.exe = gateway 主进程）
@@ -111,16 +111,17 @@ tasklist | grep -i python
 | 服务 | 跟随 Hermes 启动？ | 自己的保活机制 | 端口 |
 |------|-------------------|---------------|------|
 | gateway | 是（At logon 计划任务 Hermes_Gateway） | Hermes_Gateway_Watchdog 每5分钟 | 8644/8642 |
-| Hindsight daemon | 否（独立进程） | Hermes_Hindsight_Daemon 每5分钟 + watchdog 探针 | 9177 |
 | DSH web | 否（完全独立，重启 Hermes 不影响 DSH） | DSH_Watchdog 每1分钟 | 8080 |
 | HermesDashboard | 是（At logon 计划任务） | 无自愈（常驻） | 9120 |
 
-用户问「DSH 呢」/「Hindsight 呢」时——这些服务的死活与 gateway 无关，需单独查端口。
+用户问「DSH 呢」时——服务的死活与 gateway 无关，需单独查端口。
 
-**watchdog --status 快查**（覆盖 gateway + Hindsight daemon 两层）：
+⚠️ **Pitfall — Hindsight 是历史服务，看 watchdog 输出别误读（2026-08-26 实测）**：Hindsight 记忆 daemon 已于 2026-08-25 退役（用户明确「本地的单独的」原则 = 拒绝本地记忆迁 NAS MemOS / 不与远程合并，详见 hindsight-memory-ops skill）。但 `gateway_watchdog.py --status` 脚本仍会输出 `hindsight_daemon: down`——**这不是红灯，是脚本陈旧**，不要把它列为发现项或建议修复。判断准则：①只看 `alive`（gateway 是否在跑）；②`log_stale_s` 用来评估 gateway 日志新鲜度；③`heartbeat_stale_s` 是 watchdog 心跳缓存、不直接反映 gateway 死活；④`last_outage_reason` 排查上一次故障根因时用。`hindsight_daemon` 字段在用户未重新启用该服务前一律忽略。
+
+**watchdog --status 快查**（只看 gateway 层）：
 ```bash
 python3 'C:/Users/HMSJ/AppData/Local/hermes/scripts/gateway_watchdog.py' --status
-# alive=true, hindsight_daemon=ok → 两层都正常
+# alive=true → gateway 在跑（hindsight_daemon 字段忽略，见上方 pitfall）
 ```
 
 logs 里常见的「噪音」≠故障：

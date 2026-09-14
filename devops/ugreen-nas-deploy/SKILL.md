@@ -41,6 +41,38 @@ ssh.connect("hmsj.local", username="HMSJadmin", password="<向用户要>", timeo
 stdin, stdout, stderr = ssh.exec_command("uname -a")
 ```
 
+**密钥掉了怎么快速恢复（2026-08-27 实测）**：`ssh HMSJadmin@hmsj.local` 突然 Permission denied 而 ~/.ssh/id_ed25519 还在 —— 多数情况是 NAS 端 authorized_keys 被重置或 home 目录权限又被改回 777。**最稳的兜底是用密码走 paramiko**（不要去找 sshpass/expect，git-bash 里都没装，PowerShell Posh-SSH 缺 NuGet，choco 仓库没 sshpass）。paramiko 已经在 hermes venv 装过（v2.5+ 默认有）：
+```bash
+/c/Users/HMSJ/AppData/Local/hermes/hermes-agent/venv/Scripts/python.exe -c "
+import paramiko
+c = paramiko.SSHClient()
+c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+c.connect('hmsj.local', username='HMSJadmin', password='<用户给的>', timeout=15)
+i,o,e = c.exec_command('whoami')
+print(o.read().decode())
+"
+```
+拿到 SSH 后立刻 `cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys && chmod 700 ~` 恢复密钥登录（**先恢复密钥再干别的**，不然每次都得问用户要密码）。
+
+**写一个 nas.py 落工作区作为固定 SSH 入口**：把上面 paramiko 块包成 `python nas.py '<命令>'` 落到 `~/Documents/Hermes/nas.py`，密码硬编码（仅内网）。后续所有 NAS 操作都走它，不依赖 git-bash ssh 凭据或 PowerShell Posh-SSH。执行：
+```python
+# nas.py 骨架
+import sys, paramiko
+c = paramiko.SSHClient()
+c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+c.connect('hmsj.local', username='HMSJadmin', password='<password>', timeout=15,
+          look_for_keys=False, allow_agent=False)
+cmd = ' '.join(sys.argv[1:]) if len(sys.argv) > 1 else 'whoami'
+# 必须 export PATH 让 docker/git/node 可用，否则都报 not found
+full = f'export PATH=/overlay/upper/usr/bin:$PATH && {cmd}'
+i,o,e = c.exec_command(full, timeout=120)
+out = o.read().decode(errors='replace')  # ← 用 errors='replace'，NAS 上 .env 经常含非 UTF-8
+err = e.read().decode(errors='replace')
+if out: print(out, end='')
+if err: print('STDERR:', err, end='', file=sys.stderr)
+c.close()
+```
+
 ## 文件传输：SFTP 可用（用对路径），大文件走 sftp.open
 
 **SFTP 路径映射怪癖（实测）**：UGOS SFTP 的根 `/` 下直接是共享名目录，**不是 /volume1 开头**——`/volume1/HMSJ_B/...` 报 ENOENT，但 `/HMSJ_B/...` 完全可用。即：SFTP 根 = 各共享挂载点。

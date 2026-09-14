@@ -9,6 +9,8 @@ metadata:
   hermes:
     tags: [dsh, deepseek-harness, integration, agent]
     related_skills: [hermes-agent, windows-shell]
+    changelog:
+      - 1.0.1 (2026-08-27): ⚠️ DSH 已归档（scripts/Projects 全部移到 `*_archive/dsh-2026-08-27/`，进程停止）。本 skill 保留供考古，**不要按本 skill 的 DSH 集成方案实施**——当前默认执行模型是 Hermes 主进程。
 ---
 
 # DSH (DeepSeek Harness) 集成
