@@ -29,7 +29,7 @@ C:\Users\HMSJ\Documents\DSH\hermes-migration-20260914\
 └── logs\                          运行日志
 ```
 
-## 八个必须知道的坑
+## 十一个必须知道的坑
 
 全部为实测踩过，每一条都写进了脚本注释。
 
@@ -43,8 +43,15 @@ C:\Users\HMSJ\Documents\DSH\hermes-migration-20260914\
 | 6 | **原生命令 stderr 触发 Stop** | 一条无害 DeprecationWarning 就中断整个脚本 | stdout/stderr 分流到文件，或局部降级 `ErrorActionPreference` |
 | 7 | **lark-cli 无 im 发消息命令** | `im.messages` 只有 delete/forward/patch/read_status/urgent | 走原始 API `POST /open-apis/im/v1/messages` |
 | 8 | **卡片 schema 2.0 在部分租户不可用** | 返回 `ok:true` 但客户端降级成「请升级至最新版本客户端」，**表面成功实际看不到** | 用旧版 `config/header/elements` + `lark_md` |
+| 9 | **本机没有 bash** | `bash` 指向 WSL 存根但无发行版；`for…do…done`、`cd /c/...`、`cmp`、`mkdir -p` 全部失败 | 提示词一律用 **PowerShell 5.1 或 Python**；循环与 JSON 处理优先写 `.py` 文件而不是拼 shell 字符串 |
+| 10 | **本机没有 PowerShell 7** | 只有 `powershell.exe` 5.1，`pwsh` 不在 PATH | 脚本按 PS 5.1 写；`Join-String`、三元 `?:`、`-AsArray` 等 7.x 特性不可用 |
+| 11 | **wscript 静默丢弃空参数** | 传 `("job","task","",prescript)`，空串被丢掉后参数左移，`prescript` 落进 `-DeliverTo`，日志出现 `DELIVER FAILED to=...\xxx.py` | 缺省值用 `-` 占位，VBS 内部翻译回空串；**绝不传真正的空字符串** |
 
 > 约定：本机所有 `.ps1` / `.vbs` / `.cmd` **一律 ASCII-only**。cmd.exe 与 wscript 按 ANSI 读脚本，中文注释会把 `REM` 行冲垮。
+
+> **先验证环境再写提示词**：迁移任何 Hermes 提示词前，先跑一次环境探测任务（bash/python/lark-cli/写文件/pwd 各测一遍）。老提示词往往写死了 shell 方言，照搬必挂——`伏妖记` 那份就是满屏 bash，而本机 bash 根本不可用。
+
+> **产物必须落盘**：agent 输出要以文件形式持久化（参考实现写 `logs/<job>.out.md`）。日志里只放 160 字预览；一旦某次运行没有投递（没配投递目标／被静默哨兵拦下／投递失败），整份交付物就彻底丢了——首次 `伏妖记` 试跑就这样丢了一份 1540 字简报。
 
 ## 新建一个任务
 
@@ -63,9 +70,19 @@ Register-ScheduledTask -TaskName "DSH_Job_<Name>" -Action $action -Trigger $trig
   -Settings $settings -Principal $principal -Force
 ```
 
-4. 实跑一次并看 `logs\<job-id>.log` 的 `RUN` / `DELIVER` 行
+4. 实跑一次并看 `logs\<job-id>.log` 的 `RUN` / `DELIVER` 行；完整交付物在同目录 `<job-id>.out.md`
 
 **`-StartWhenAvailable` 必开**：错过的时间点会被补跑，否则休眠/关机就永久丢一次。
+
+## 运行器的三个可选能力
+
+| 能力 | 用法 | 说明 |
+|---|---|---|
+| **前置脚本** | VBS 第 4 参数传脚本路径，提示词里写 `{{PRESCRIPT}}` | 脚本 stdout 替换占位符后再交给 agent。Hermes 的 `script` 字段（如上班日判定 WORKDAY/HOLIDAY/WEEKEND）就靠它承接 |
+| **静默哨兵** | 运行器参数 `-SilentSentinel`，默认 `[SILENT]` | agent 最终回复以该词开头 → 记日志但不投递，例行「今日无更新」不进群 |
+| **产物落盘** | 自动 | 完整输出写 `logs\<job-id>.out.md`，日志只放 160 字预览 |
+
+**测试期先不投递**：用 `-DeliverTo ''` 或 VBS 的 `-` 占位跑一次，确认逻辑对了再挂投递目标。**注意 agent 的副作用不止于投递**——`伏妖记` 审读试跑时没有投递，但它照样往文档挂出了 8 条评论。凡是会写外部系统（评论/文档/消息）的任务，试跑前先确认这一步会产生什么。
 
 ## 飞书投递的两种形态
 
